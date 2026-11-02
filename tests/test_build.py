@@ -107,6 +107,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("if: github.event_name == 'workflow_dispatch'", workflow)
         self.assertRegex(workflow, r'easimon/maximize-build-space@[0-9a-f]{40}')
         self.assertIn('root-reserve-mb: 2048', workflow)
+        self.assertIn('swap-size-mb: 1024', workflow)
+        self.assertIn('sudo swapoff -a', workflow)
+        self.assertIn('sudo rm -f /swapfile /mnt/swapfile', workflow)
         self.assertIn('DockerRootDir', workflow)
         for setting in ('remove-dotnet: \'true\'', 'remove-android: \'true\'',
                         'remove-haskell: \'true\'', 'remove-codeql: \'true\'',
