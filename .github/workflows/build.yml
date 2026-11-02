@@ -58,7 +58,7 @@ jobs:
       - name: Combine disposable runner disks and reclaim build space
         uses: easimon/maximize-build-space@fc881a613ad2a34aca9c9624518214ebc21dfc0c # v10, immutable commit pin
         with:
-          root-reserve-mb: 6144
+          root-reserve-mb: 2048
           temp-reserve-mb: 512
           swap-size-mb: 2048
           remove-dotnet: 'true'
@@ -67,6 +67,23 @@ jobs:
           remove-codeql: 'true'
           remove-docker-images: 'true'
       - uses: actions/checkout@v4
+      - name: Move Docker data onto the expanded build volume
+        run: |
+          set -euo pipefail
+          docker_root="$GITHUB_WORKSPACE/.docker-root"
+          sudo mkdir -p "$docker_root" /etc/docker
+          if [[ -f /etc/docker/daemon.json ]]; then
+            sudo jq --arg data_root "$docker_root" '. + {"data-root": $data_root}' \
+              /etc/docker/daemon.json > /tmp/docker-daemon.json
+          else
+            printf '{"data-root":"%s"}\n' "$docker_root" > /tmp/docker-daemon.json
+          fi
+          sudo install -o root -g root -m 0644 /tmp/docker-daemon.json /etc/docker/daemon.json
+          rm -f /tmp/docker-daemon.json
+          sudo systemctl restart docker
+          timeout 60s bash -c 'until docker info >/dev/null 2>&1; do sleep 1; done'
+          docker info --format 'Docker data root: {{.DockerRootDir}}'
+          df -h "$GITHUB_WORKSPACE" /
       - name: Prune Docker and apt caches on this disposable hosted runner
         run: |
           set -euo pipefail
@@ -80,7 +97,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git curl ca-certificates python3 gnupg \
             e2fsprogs rsync file binutils gzip
-      - name: Preflight minimum 60 GiB free space
+      - name: Preflight minimum 40 GiB free space
         run: scripts/preflight.sh
       - name: Shallow sync pinned AOSP on host Python 3
         run: |

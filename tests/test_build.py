@@ -99,11 +99,15 @@ class WorkflowTests(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
         reclaim = workflow.index('uses: easimon/maximize-build-space@')
         checkout = workflow.index('uses: actions/checkout@v4', workflow.index('  build:'))
+        docker_root = workflow.index('name: Move Docker data onto the expanded build volume')
         preflight = workflow.index('run: scripts/preflight.sh')
         self.assertLess(reclaim, checkout)
+        self.assertLess(checkout, docker_root)
         self.assertLess(checkout, preflight)
         self.assertIn("if: github.event_name == 'workflow_dispatch'", workflow)
         self.assertRegex(workflow, r'easimon/maximize-build-space@[0-9a-f]{40}')
+        self.assertIn('root-reserve-mb: 2048', workflow)
+        self.assertIn('DockerRootDir', workflow)
         for setting in ('remove-dotnet: \'true\'', 'remove-android: \'true\'',
                         'remove-haskell: \'true\'', 'remove-codeql: \'true\'',
                         'remove-docker-images: \'true\''):

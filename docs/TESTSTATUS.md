@@ -4,7 +4,7 @@ Stand: 2. November 2026. **Der vollständige AOSP-Build auf GitHub Actions und e
 
 ## Erfolgreich ausgeführt
 
-Die gemeinsame Hosttestsuite bestand **36 Python-Tests**. Zusätzlich bestanden **12 Lua-RFB-Assertions**, die LuaJIT-Bytecodeprüfung sämtlicher Lua-Dateien, die Shell-Syntaxprüfung sämtlicher Starter und Buildskripte sowie `shellcheck -S warning` ohne verbleibende Warnungen. Workflow-YAML, Trigger, unveränderlicher Hash-Pin der Runner-Disk-Action, deren Start vor Checkout, die 40-GiB-Vorprüfung, Testabhängigkeit und das 350-Minuten-Limit wurden geprüft. Die neue Workflow-Regression prüft Konfiguration und Reihenfolge; sie führt die LVM-Action nicht tatsächlich auf einem GitHub-Runner aus.
+Die gemeinsame Hosttestsuite bestand **36 Python-Tests**. Zusätzlich bestanden **12 Lua-RFB-Assertions**, die LuaJIT-Bytecodeprüfung sämtlicher Lua-Dateien, die Shell-Syntaxprüfung sämtlicher Starter und Buildskripte sowie `shellcheck -S warning` ohne verbleibende Warnungen. Workflow-YAML, Trigger, unveränderlicher Hash-Pin der Runner-Disk-Action, deren Start vor Checkout, die 40-GiB-Vorprüfung, Testabhängigkeit und das 350-Minuten-Limit wurden geprüft. Ein manueller GitHub-Lauf hat die LVM-Action tatsächlich ausgeführt, aber nur ein Buildvolume von 37 GB / 36,4 GiB bereitgestellt; er brach vor dem AOSP-Sync an der 40-GiB-Grenze ab. Die neue 2-GiB-Rootreserve und Verlagerung des Docker-Datenpfads wurden noch nicht auf GitHub gemessen.
 
 Elf native Integrationstests kompilieren und starten die echten C-Komponenten. Sie prüfen Framebuffer-ioctls, Shared-Memory-Pixel, Deskriptor-Duplikation, Metadaten, Seitenwechsel, RGB565-/RGB888-Konvertierung, Endianness, geänderte Zeilen, inkrementelle Updates, fehlerhafte RFB-Clients, Wiederverbinden und Transfer-Timeouts. Für Hosttests wird Eingabe ausdrücklich mit `--no-input` deaktiviert; das ist kein Ersatz für einen uinput-Gerätetest.
 
@@ -26,7 +26,7 @@ shellcheck -S warning runtime/*.sh scripts/*.sh
 
 ## Noch nicht nachgewiesen
 
-Die Ubuntu-14.04-/OpenJDK-7-Kompatibilitätsumgebung muss den vollständigen AOSP-Build in CI noch erfolgreich abschließen. Ebenso unbestätigt sind die tatsächlich kombinierbare Speicherkapazität und Laufzeit eines konkreten GitHub-Runners, die resultierenden ARM32-Bionic-Binärdateien und der erste Android-Framework-Boot. Die gepinnte Drittanbieter-LVM-Action ist nicht von GitHub unterstützt und kann durch Runner-Änderungen ausfallen.
+Die Ubuntu-14.04-/OpenJDK-7-Kompatibilitätsumgebung muss den vollständigen AOSP-Build in CI noch erfolgreich abschließen. Ebenso unbestätigt sind die neue kombinierte Speicherkapazität und Laufzeit eines konkreten GitHub-Runners, die resultierenden ARM32-Bionic-Binärdateien und der erste Android-Framework-Boot. Die gepinnte Drittanbieter-LVM-Action ist nicht von GitHub unterstützt und kann durch Runner-Änderungen ausfallen.
 
 Auf dem Kobo müssen insbesondere Binder-Protokoll 7, Ashmem, uinput-Geräteerzeugung und Event-Erkennung, PID-/Mount-Namespaces, Loop/ext4, Software-Gralloc, SurfaceFlinger, Systemserver sowie Touch und E-Ink-Darstellung geprüft werden. `sh android.sh check` prüft Kernelvoraussetzungen, ersetzt jedoch keinen Bootnachweis. Für den Framework-Boot muss `sh android.sh exec getprop sys.boot_completed` schließlich `1` ausgeben.
 
