@@ -162,6 +162,11 @@ static int keycode(uint32_t sym)
     default: return 0;
     }
 }
+static int unsafe_no_namespaces(void)
+{
+    const char *value = getenv("KOBO_ALLOW_UNSAFE_NO_NAMESPACES");
+    return value && !strcmp(value, "1");
+}
 int kobo_input_key(struct kobo_input *i, uint32_t sym, int down)
 {
     int code = keycode(sym);
@@ -210,10 +215,15 @@ int kobo_probe(void)
     if (!pid) {
 #ifdef SYS_unshare
         if (syscall(SYS_unshare, CLONE_NEWNS | CLONE_NEWPID) < 0) {
-            fprintf(stderr, "namespaces: unshare mount/pid failed: %s\n", strerror(errno)); _exit(1);
-        }
-        _exit(0);
+            if (!unsafe_no_namespaces()) {
+                fprintf(stderr, "namespaces: unshare mount/pid failed: %s\n", strerror(errno)); _exit(1);
+            }
+            fprintf(stderr, "namespaces: unavailable; unsafe chroot fallback enabled\n"); _exit(0);
+        } else _exit(0);
 #else
+        if (unsafe_no_namespaces()) {
+            fprintf(stderr, "namespaces: syscall unavailable; unsafe chroot fallback enabled\n"); _exit(0);
+        }
         fprintf(stderr, "namespaces: unshare syscall unavailable\n"); _exit(1);
 #endif
     }

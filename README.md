@@ -43,9 +43,9 @@ sh android.sh stop
 
 ## Voraussetzungen und Sicherheit
 
-Erforderlich sind Root-Rechte, ein KitKat-kompatibler Binder-Treiber, Ashmem, `uinput`, PID-/Mount-Namespaces, Loop-Geräte und ext4. Der Starter prüft diese Funktionen, erzeugt private Gerätedateien und startet Android-init nur als PID 1 im eigenen PID-Namespace. Ohne erfüllte Voraussetzungen bricht er ab. Keine unpassenden Kernelmodule laden und keine Kernel- oder Firmwarepartitionen überschreiben.
+Erforderlich sind Root-Rechte, ein KitKat-kompatibler Binder-Treiber, Ashmem, `uinput`, Loop-Geräte und ext4. Der Starter verwendet PID-/Mount-Namespaces, wenn der Kernel sie unterstützt. Auf älteren Kobo-Kerneln ist standardmäßig ein weniger isolierter Chroot-Fallback aktiv, damit Android überhaupt starten kann; dabei teilen Android und Kobo Mount- und PID-Namespace. Keine unpassenden Kernelmodule laden und keine Kernel- oder Firmwarepartitionen überschreiben.
 
-VNC lauscht nur auf `127.0.0.1:5963`. Die echten Kobo-Touch- und Framebuffer-Geräte werden nicht in Android eingebunden. Android-Prozesse teilen sich jedoch Kernel und Netzwerkstack mit dem Host. KitKat ist veraltet; nur mit vertrauenswürdigen Apps und ausgeschaltetem WLAN experimentieren und keine persönlichen Konten einrichten. Vor dem ersten Test ein Backup anlegen. Belegte Hardwaregrenzen stehen in [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md).
+VNC lauscht nur auf `127.0.0.1:5963`. Die echten Kobo-Touch- und Framebuffer-Geräte werden nicht in Android eingebunden. Im Namespace-Fallback teilen Android-Prozesse zusätzlich Mount- und PID-Namespace mit dem Host; ein Fehler kann dann den Kobo beeinflussen. Android teilt sich immer Kernel und Netzwerkstack mit dem Host. KitKat ist veraltet; nur mit vertrauenswürdigen Apps und ausgeschaltetem WLAN experimentieren und keine persönlichen Konten einrichten. Vor dem ersten Test ein Backup anlegen. Belegte Hardwaregrenzen stehen in [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md).
 
 ## Lokale Prüfungen
 

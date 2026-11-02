@@ -27,6 +27,10 @@
 #define MS_PRIVATE (1 << 18)
 #endif
 static volatile sig_atomic_t child_pid;
+static int unsafe_no_namespaces(void) {
+    const char *value = getenv("KOBO_ALLOW_UNSAFE_NO_NAMESPACES");
+    return value && !strcmp(value, "1");
+}
 static void terminate_child(int sig) {
     (void)sig;
     /* PID 1 may ignore TERM. Kill only our private namespace init; the kernel
@@ -37,14 +41,18 @@ static void die(const char *what) { perror(what); exit(1); }
 static int isolated(const char *root, int check) {
     pid_t p;
     int status;
-    if (syscall(__NR_unshare, CLONE_NEWNS | CLONE_NEWPID) < 0)
-        die("unshare: kernel needs CONFIG_NAMESPACES, CONFIG_PID_NS and CONFIG_MNT_NS");
-    if (mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL) < 0) die("make mounts private");
+    int unsafe = unsafe_no_namespaces();
+    if (syscall(__NR_unshare, CLONE_NEWNS | CLONE_NEWPID) < 0) {
+        if (!unsafe) die("unshare: kernel needs CONFIG_NAMESPACES, CONFIG_PID_NS and CONFIG_MNT_NS");
+        fputs("WARNING: starting without mount/PID namespace isolation\n", stderr);
+    } else if (mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL) < 0) {
+        die("make mounts private");
+    }
     p = fork();
     if (p < 0) die("fork PID namespace");
     if (!p) {
         char proc[PATH_MAX];
-        if (getpid() != 1) { fputs("Refusing to run init outside a private PID namespace\n", stderr); _exit(1); }
+        if (!unsafe && getpid() != 1) { fputs("Refusing to run init outside a private PID namespace\n", stderr); _exit(1); }
         if (check) _exit(0);
         if (snprintf(proc, sizeof proc, "%s/proc", root) >= (int)sizeof proc) _exit(1);
         if (mount("proc", proc, "proc", MS_NOSUID | MS_NODEV | MS_NOEXEC, NULL)) die("private proc mount");

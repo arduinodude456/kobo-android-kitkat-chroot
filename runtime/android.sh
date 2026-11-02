@@ -10,7 +10,8 @@ CONFIG="$BASE/config"
 [ ! -f "$CONFIG" ] || . "$CONFIG"
 KOBO_BINDER_DEVICE=${KOBO_BINDER_DEVICE:-/dev/binder}
 KOBO_ASHMEM_DEVICE=${KOBO_ASHMEM_DEVICE:-/dev/ashmem}
-export KOBO_BINDER_DEVICE KOBO_ASHMEM_DEVICE
+KOBO_ALLOW_UNSAFE_NO_NAMESPACES=${KOBO_ALLOW_UNSAFE_NO_NAMESPACES:-1}
+export KOBO_BINDER_DEVICE KOBO_ASHMEM_DEVICE KOBO_ALLOW_UNSAFE_NO_NAMESPACES
 mkdir -p "$RUN"
 fail() { echo "Android: $*" >&2; exit 1; }
 root_required() { [ "$(id -u)" = 0 ] || fail 'Root erforderlich (aus KOReader starten).'; }

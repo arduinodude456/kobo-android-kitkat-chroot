@@ -52,7 +52,7 @@ Die Android-Daten liegen im ext4-Image. Vor einem Update `sh android.sh stop` au
 
 ## Fehler verstehen
 
-Das Hauptlog ist `/mnt/onboard/.adds/android/android.log`. Ein erfolgreicher `check` ist nur eine Kernel-Vorprüfung. Ein Fehler bei Binder, Ashmem, `uinput`, ext4, Loop oder Namespaces ist ein echter Blocker, kein fehlendes Lua-Modul. Das Projekt lädt keine passenden Treiber nach und ersetzt keinen Kobo-Kernel. Ein Fake-Framebuffer löst diese fehlenden Voraussetzungen nicht.
+Das Hauptlog ist `/mnt/onboard/.adds/android/android.log`. Ein erfolgreicher `check` ist nur eine Kernel-Vorprüfung. Ein Fehler bei Binder, Ashmem, `uinput`, ext4 oder Loop ist ein echter Blocker, kein fehlendes Lua-Modul. Fehlen PID-/Mount-Namespaces, verwendet der Starter standardmäßig einen ausdrücklich weniger isolierten Chroot-Fallback; das Log weist darauf hin. Das Projekt lädt keine passenden Treiber nach und ersetzt keinen Kobo-Kernel. Ein Fake-Framebuffer löst diese fehlenden Voraussetzungen nicht.
 
 `config` enthält nur die vertrauenswürdigen Shell-Einstellungen für bereits vorhandene Binder-/Ashmem-Gerätepfade. Nicht einfach Nodes mit geratenen Major-/Minor-Nummern erzeugen. Auch ein vorhandener Binder-Node kann eine unpassende ABI haben. Die Gerätekonfiguration kann je nach Kobo-Firmware unterschiedlich sein.
 
@@ -71,6 +71,6 @@ Nach einem abgebrochenen Starter kann `sh android.sh recover` verwaiste Mounts e
 
 ## Sicherheitsregeln
 
-Android vor dem USB-Datenträgermodus beenden. Während des Betriebs das Image nicht kopieren, austauschen oder verschieben. Keine persönlichen Konten und keine untrusted APKs verwenden. KitKat ist ein historisches, nicht mehr zeitgemäß abgesichertes Betriebssystem. Das Android teilt sich den Host-Netzwerkstack; fehlende Android-Netzwerkeinstellungen sind **keine** Netzwerksperre. Für dieses Experiment WLAN am Kobo ausschalten.
+Android vor dem USB-Datenträgermodus beenden. Während des Betriebs das Image nicht kopieren, austauschen oder verschieben. Keine persönlichen Konten und keine untrusted APKs verwenden. KitKat ist ein historisches, nicht mehr zeitgemäß abgesichertes Betriebssystem. Wenn der Kernel keine Namespaces unterstützt, teilt Android zusätzlich Mount- und PID-Namespace mit dem Kobo-Host; nur mit vertrauenswürdigen Apps und besonders vorsichtig experimentieren. Das Android teilt sich den Host-Netzwerkstack; fehlende Android-Netzwerkeinstellungen sind **keine** Netzwerksperre. Für dieses Experiment WLAN am Kobo ausschalten.
 
 Die Anwendung schreibt nicht in `.kobo/upgrade`, nicht auf rohe eMMC-/SD-Geräte und nicht in Bootloader- oder Kernel-Partitionen. Trotzdem können ein Absturz, ein voller Datenträger oder unpassende Root-Software Daten beschädigen. Das ist kein Ersatz für ein Backup.

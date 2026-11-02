@@ -3,5 +3,9 @@
 # Kernel devices must already exist. The launcher never loads unverified modules.
 KOBO_BINDER_DEVICE=/dev/binder
 KOBO_ASHMEM_DEVICE=/dev/ashmem
+# Use the private PID/mount namespaces when available. On older Kobo kernels,
+# automatically fall back to a less isolated chroot so Android can start.
+# This fallback shares the host mount and PID namespaces and is less safe.
+KOBO_ALLOW_UNSAFE_NO_NAMESPACES=1
 # Display is deliberately fixed to 600x800 RGB565 in this low-RAM build.
 # VNC is deliberately fixed to IPv4 loopback 127.0.0.1:5963 (no network password).

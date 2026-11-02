@@ -14,7 +14,7 @@ Der lokale VNC-Endpunkt verwendet keine Authentifizierung. Das ist nur wegen der
 
 ## Prozess- und Dateisystemgrenzen
 
-`android.sh` mountet ausschließlich unter seinem eigenen `run/`-Verzeichnis: das ext4-Image und kleine temporäre Dateisysteme für Geräte und Bilddaten. `kobo-container` fordert einen privaten Mount- und PID-Namespace an. Erst dessen Kindprozess mit PID 1 darf das eigens angepasste Android-`/init` starten. Ein Fehler beim Erzeugen der Namespaces führt zum Abbruch, nicht zum Start von Android-init im Kobo-Hostsystem.
+`android.sh` mountet zunächst unter seinem eigenen `run/`-Verzeichnis: das ext4-Image und kleine temporäre Dateisysteme für Geräte und Bilddaten. `kobo-container` verwendet private Mount- und PID-Namespaces, wenn der Kernel sie anbietet. Auf älteren Kobo-Kerneln ist standardmäßig ein weniger isolierter Chroot-Fallback aktiviert; dann teilen Android und der Host Mount- und PID-Namespace. Dieser Fallback ist absichtlich kein Sicherheitsboundary und kann bei Abstürzen oder fehlerhaften Mounts den Kobo-Host beeinflussen.
 
 Die Emulator-Ramdisk wird übernommen, ihre generische Emulator-`init.rc` aber durch die kleine isolierte Kobo-Init-Konfiguration ersetzt. Sie darf insbesondere keine Host-SELinux-Policy laden und keine Host-`/dev`-, `/proc`- oder `/sys`-Mounts verändern. Die Property-Infrastruktur und die Verwaltung der Android-Dienste bleiben erhalten. Ein echter Start unter dem Kobo-Kernel muss noch auf Hardware nachgewiesen werden. [3]
 
@@ -22,7 +22,7 @@ Die Aufteilung ist keine Sicherheitsgrenze für bösartige Root-Prozesse: Es gib
 
 ## Unverzichtbare Kernelvoraussetzungen
 
-Die Vorprüfung verlangt einen für KitKat kompatiblen Binder-Treiber, Ashmem, `uinput`, PID-/Mount-Namespaces, Loop-Geräte und ext4. Binder ist die Android-Kommunikationsgrundlage und beinhaltet einen Kernel-Treiber. Ein Userspace-Shim ersetzt ihn nicht. [4]
+Die Vorprüfung verlangt einen für KitKat kompatiblen Binder-Treiber, Ashmem, `uinput`, Loop-Geräte und ext4. PID-/Mount-Namespaces werden verwendet, wenn vorhanden; ohne sie greift der standardmäßige weniger isolierte Chroot-Fallback. Binder ist die Android-Kommunikationsgrundlage und beinhaltet einen Kernel-Treiber. Ein Userspace-Shim ersetzt ihn nicht. [4]
 
 Fehlende `/dev/binder`- oder `/dev/ashmem`-Nodes können auf fehlende Treiber oder lediglich fehlende Nodes hinweisen. Das Projekt rät keine Major-/Minor-Nummern und lädt keine beliebigen Kernelmodule. Ohne einen nachweislich passenden Treiber ist das Gerät nicht freigegeben. Moderne Binder-Protokollvarianten sind nicht automatisch mit dem alten ARM32-Userspace kompatibel; die Vorprüfung prüft die erwartete ABI.
 
