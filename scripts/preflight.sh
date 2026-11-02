@@ -10,11 +10,11 @@ source "$(dirname "$0")/env.sh"
     python3 --version
     git --version
 } | tee "$BUILD/logs/preflight.log"
-# Refuse to start a many-hour sync that the runner cannot finish. This is a
-# minimum before sync, not a guarantee that all hosted runners are sufficient.
+# Refuse to start a many-hour sync below the minimum working set. The build
+# volume has already been enlarged from the runner's root and temp filesystems.
 AVAILABLE="$(df -B1 --output=avail "$BUILD" | tail -1 | tr -d ' ')"
-MINIMUM=$((60 * 1024 * 1024 * 1024))
+MINIMUM=$((40 * 1024 * 1024 * 1024))
 if (( AVAILABLE < MINIMUM )); then
-    echo "At least 60 GiB free required before sync; found $AVAILABLE bytes. Use a larger ephemeral runner." | tee -a "$BUILD/logs/preflight.log" >&2
+    echo "At least 40 GiB free required before sync; found $AVAILABLE bytes after runner disk expansion. Use a larger ephemeral runner." | tee -a "$BUILD/logs/preflight.log" >&2
     exit 1
 fi

@@ -4,7 +4,7 @@ Stand: 2. November 2026. **Der vollständige AOSP-Build auf GitHub Actions und e
 
 ## Erfolgreich ausgeführt
 
-Die gemeinsame Hosttestsuite bestand **36 Python-Tests**. Zusätzlich bestanden **12 Lua-RFB-Assertions**, die LuaJIT-Bytecodeprüfung sämtlicher Lua-Dateien, die Shell-Syntaxprüfung sämtlicher Starter und Buildskripte sowie `shellcheck -S warning` ohne verbleibende Warnungen. Workflow-YAML, Trigger, unveränderlicher Hash-Pin der Runner-Disk-Action, deren Start vor Checkout, die 60-GiB-Vorprüfung, Testabhängigkeit und das 350-Minuten-Limit wurden geprüft. Die neue Workflow-Regression prüft Konfiguration und Reihenfolge; sie führt die LVM-Action nicht tatsächlich auf einem GitHub-Runner aus.
+Die gemeinsame Hosttestsuite bestand **36 Python-Tests**. Zusätzlich bestanden **12 Lua-RFB-Assertions**, die LuaJIT-Bytecodeprüfung sämtlicher Lua-Dateien, die Shell-Syntaxprüfung sämtlicher Starter und Buildskripte sowie `shellcheck -S warning` ohne verbleibende Warnungen. Workflow-YAML, Trigger, unveränderlicher Hash-Pin der Runner-Disk-Action, deren Start vor Checkout, die 40-GiB-Vorprüfung, Testabhängigkeit und das 350-Minuten-Limit wurden geprüft. Die neue Workflow-Regression prüft Konfiguration und Reihenfolge; sie führt die LVM-Action nicht tatsächlich auf einem GitHub-Runner aus.
 
 Elf native Integrationstests kompilieren und starten die echten C-Komponenten. Sie prüfen Framebuffer-ioctls, Shared-Memory-Pixel, Deskriptor-Duplikation, Metadaten, Seitenwechsel, RGB565-/RGB888-Konvertierung, Endianness, geänderte Zeilen, inkrementelle Updates, fehlerhafte RFB-Clients, Wiederverbinden und Transfer-Timeouts. Für Hosttests wird Eingabe ausdrücklich mit `--no-input` deaktiviert; das ist kein Ersatz für einen uinput-Gerätetest.
 

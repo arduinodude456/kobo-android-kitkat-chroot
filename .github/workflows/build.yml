@@ -47,6 +47,14 @@ jobs:
       JOBS: '2'
       ROOTFS_SIZE_MIB: '768'
     steps:
+      - name: Remove unused preinstalled build tools
+        run: |
+          set -euo pipefail
+          # This disposable hosted VM is dedicated to AOSP; none of these tools
+          # are used by the host-side sync/build/package scripts.
+          sudo rm -rf /opt/hostedtoolcache /usr/local/share/boost \
+            /usr/local/share/powershell /opt/google/chrome /opt/microsoft/msedge
+          df -h /
       - name: Combine disposable runner disks and reclaim build space
         uses: easimon/maximize-build-space@fc881a613ad2a34aca9c9624518214ebc21dfc0c # v10, immutable commit pin
         with:

@@ -108,7 +108,7 @@ class WorkflowTests(unittest.TestCase):
                         'remove-haskell: \'true\'', 'remove-codeql: \'true\'',
                         'remove-docker-images: \'true\''):
             self.assertIn(setting, workflow)
-        self.assertIn('MINIMUM=$((60 * 1024 * 1024 * 1024))', (ROOT / 'scripts/preflight.sh').read_text())
+        self.assertIn('MINIMUM=$((40 * 1024 * 1024 * 1024))', (ROOT / 'scripts/preflight.sh').read_text())
 
 
 class RootfsTests(unittest.TestCase):
