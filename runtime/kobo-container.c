@@ -38,6 +38,21 @@ static void terminate_child(int sig) {
     if (child_pid > 0) kill((pid_t)child_pid, SIGKILL);
 }
 static void die(const char *what) { perror(what); exit(1); }
+static void mount_proc(const char *path, int unsafe) {
+    int saved;
+    if (mkdir(path, 0755) < 0 && errno != EEXIST) die("create proc mountpoint");
+    if (!mount("proc", path, "proc", MS_NOSUID | MS_NODEV | MS_NOEXEC, NULL)) return;
+    saved = errno;
+    if (!unsafe) { errno = saved; die("private proc mount"); }
+    /* This device cannot create a procfs mount in the unshared fallback.
+     * Reuse the host procfs only in the explicitly unsafe mode; Android init
+     * needs /proc, and the normal isolated path remains strict. */
+    if (!mount("/proc", path, NULL, MS_BIND | MS_REC, NULL)) {
+        fputs("WARNING: private proc mount unavailable; using host /proc in unsafe fallback\n", stderr);
+        return;
+    }
+    errno = saved; die("private proc mount");
+}
 static int isolated(const char *root, int check) {
     pid_t p;
     int status;
@@ -55,7 +70,7 @@ static int isolated(const char *root, int check) {
         if (!unsafe && getpid() != 1) { fputs("Refusing to run init outside a private PID namespace\n", stderr); _exit(1); }
         if (check) _exit(0);
         if (snprintf(proc, sizeof proc, "%s/proc", root) >= (int)sizeof proc) _exit(1);
-        if (mount("proc", proc, "proc", MS_NOSUID | MS_NODEV | MS_NOEXEC, NULL)) die("private proc mount");
+        mount_proc(proc, unsafe);
         if (chdir(root) || chroot(".") || chdir("/")) die("chroot");
         if (access("/kobo-chroot", F_OK)) die("rootfs lacks kobo-chroot marker");
         /* No host environment, no inherited LD_PRELOAD or library paths. */
