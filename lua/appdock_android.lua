@@ -17,11 +17,22 @@ local HOST, PORT = "127.0.0.1", 5963
 local function quote(s) return "'" .. tostring(s):gsub("'", "'\\''") .. "'" end
 local function exists(path) local f = io.open(path, "rb"); if f then f:close(); return true end; return false end
 local function command(arg) return "sh " .. quote(BASE .. "/android.sh") .. " " .. arg end
-local function tail()
-    local f = io.open(BASE .. "/android.log", "rb")
-    if not f then return "Kein android.log vorhanden." end
-    local n = f:seek("end") or 0; f:seek("set", math.max(0, n - 1400))
+local function tail_file(path, limit)
+    local f = io.open(path, "rb")
+    if not f then return "" end
+    local n = f:seek("end") or 0; f:seek("set", math.max(0, n - limit))
     local s = f:read("*a") or ""; f:close(); return s
+end
+local function diagnostics()
+    local log = tail_file(BASE .. "/android.log", 1800)
+    local init = tail_file(BASE .. "/android-init.log", 1200)
+    if log == "" then log = "Kein android.log vorhanden." end
+    if init ~= "" then log = log .. "\n\n--- android-init.log ---\n" .. init end
+    return log
+end
+local function recover_stale_state()
+    -- recover is conservative: active Android processes are never killed.
+    os.execute("(" .. command("recover") .. ") >/dev/null 2>&1")
 end
 local function u16(s, i) local a,b=s:byte(i,i+1); return a*256+b end
 local function u32(s, i) local a,b,c,d=s:byte(i,i+3); return ((a*256+b)*256+c)*256+d end
@@ -149,6 +160,7 @@ function View:init()
     for i,d in ipairs(defs) do
         self.buttons[i]={label=TextWidget:new{text=d[1],face=self.face},key=d[2],rect=Geom:new{x=(i-1)*bw,y=self.dimen.h-90,w=bw,h=90}}
     end
+    recover_stale_state()
     os.execute(command("start") .. " >/dev/null 2>&1")
     self.deadline=socket.gettime()+180
     self.tick=function() self:pollAndroid() end
@@ -166,7 +178,7 @@ function View:paintTo(bb,x,y)
 end
 function View:fail(text)
     UIManager:close(self,"full")
-    UIManager:show(InfoMessage:new{text=text .. "\n\n" .. tail()})
+    UIManager:show(InfoMessage:new{text=text .. "\n\n" .. diagnostics()})
 end
 function View:pollAndroid()
     if self.closed then return end
