@@ -104,7 +104,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertLess(rootfs, package)
         self.assertIn("if: github.event_name == 'workflow_dispatch'", workflow)
         self.assertIn('timeout-minutes: 45', workflow)
-        self.assertIn('kobo-android-lollipop-arm32-experimental', workflow)
+        self.assertIn('kobo-android-lollipop-arm32-${{ github.sha }}', workflow)
         self.assertNotIn('maximize-build-space', workflow)
         self.assertNotIn('scripts/01-source.sh', workflow)
         self.assertNotIn('scripts/02-aosp.sh', workflow)
