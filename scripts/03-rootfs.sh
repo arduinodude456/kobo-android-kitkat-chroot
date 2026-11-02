@@ -6,12 +6,19 @@ sudo python3 "$ROOT/scripts/rootfs.py" prepare --product "$PRODUCT_OUT" --stage 
 # Output belongs to the invoking CI user; only reading the stage needs root.
 # shellcheck disable=SC2024
 sudo python3 "$ROOT/scripts/rootfs.py" list --stage "$STAGE" > "$BUILD/rootfs-files.txt"
-# The old fs_config binary and its libraries execute inside their old-glibc
-# build environment, not on the modern host. -C includes Linux capabilities.
-docker run --rm -i --user "$(id -u):$(id -g)" -v "$AOSP_DIR:/aosp:ro" \
-    "$BUILD_IMAGE" /aosp/out/host/linux-x86/bin/fs_config -C \
-    < "$BUILD/rootfs-files.txt" > "$BUILD/rootfs-fs-config.txt"
-sudo python3 "$ROOT/scripts/rootfs.py" apply-config --stage "$STAGE" --config "$BUILD/rootfs-fs-config.txt"
+FS_CONFIG="$AOSP_DIR/out/host/linux-x86/bin/fs_config"
+if [[ -x "$FS_CONFIG" ]]; then
+    # The old fs_config binary and its libraries execute inside their old-glibc
+    # build environment, not on the modern host. -C includes Linux capabilities.
+    docker run --rm -i --user "$(id -u):$(id -g)" -v "$AOSP_DIR:/aosp:ro" \
+        "$BUILD_IMAGE" /aosp/out/host/linux-x86/bin/fs_config -C \
+        < "$BUILD/rootfs-files.txt" > "$BUILD/rootfs-fs-config.txt"
+    sudo python3 "$ROOT/scripts/rootfs.py" apply-config --stage "$STAGE" --config "$BUILD/rootfs-fs-config.txt"
+else
+    # The SDK API-19 system partition and ramdisk were copied as root, preserving
+    # their native uid/gid, modes and symlinks; do not replace them with AOSP fs_config.
+    echo 'Using file ownership and modes preserved from the verified SDK image.'
+fi
 sudo python3 "$ROOT/scripts/rootfs.py" image --stage "$STAGE" \
     --output "$BUILD/rootfs.img" --size-mib "${ROOTFS_SIZE_MIB:-768}"
 # gzip -n omits timestamps; a sparse ext4 file compresses to its populated data.

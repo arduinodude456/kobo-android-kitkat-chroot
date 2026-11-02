@@ -108,8 +108,9 @@ def package(root, build, product, dist):
     for path in sorted(pkg.rglob('*')):
         if path.is_file():
             files.append({'path': path.relative_to(pkg).as_posix(), 'size': path.stat().st_size, 'sha256': sha256(path)})
-    manifest = {'format': 1, 'aosp_release': 'android-4.4.4_r2', 'architecture': 'ARM32',
-        'rootfs_bytes': size, 'hardware_tested': False, 'files': files}
+    manifest = {'format': 1, 'android_build': (build / 'AOSP-RELEASE.txt').read_text().strip(),
+        'source_type': 'prebuilt Android SDK emulator system image; Kobo hardware adaptation is experimental',
+        'architecture': 'ARM32', 'rootfs_bytes': size, 'hardware_tested': False, 'files': files}
     (pkg / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     # This file lists every payload file, including manifest.json, but not itself.
     checksum_lines = [sha256(path) + '  ' + path.relative_to(pkg).as_posix() for path in sorted(pkg.rglob('*')) if path.is_file()]

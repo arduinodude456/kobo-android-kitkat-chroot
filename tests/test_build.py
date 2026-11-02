@@ -95,27 +95,27 @@ class PatcherTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
-    def test_runner_space_is_reclaimed_before_checkout_and_preflight(self):
+    def test_prebuilt_image_workflow_skips_full_aosp_build(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
-        reclaim = workflow.index('uses: easimon/maximize-build-space@')
-        checkout = workflow.index('uses: actions/checkout@v4', workflow.index('  build:'))
-        docker_root = workflow.index('name: Move Docker data onto the expanded build volume')
-        preflight = workflow.index('run: scripts/preflight.sh')
-        self.assertLess(reclaim, checkout)
-        self.assertLess(checkout, docker_root)
-        self.assertLess(checkout, preflight)
+        prebuilt = workflow.index('scripts/00-prebuilt-sdk.sh')
+        rootfs = workflow.index('scripts/03-rootfs.sh')
+        package = workflow.index('scripts/04-package.sh')
+        self.assertLess(prebuilt, rootfs)
+        self.assertLess(rootfs, package)
         self.assertIn("if: github.event_name == 'workflow_dispatch'", workflow)
-        self.assertRegex(workflow, r'easimon/maximize-build-space@[0-9a-f]{40}')
-        self.assertIn('root-reserve-mb: 2048', workflow)
-        self.assertIn('swap-size-mb: 1024', workflow)
-        self.assertIn('sudo swapoff -a', workflow)
-        self.assertIn('sudo rm -f /swapfile /mnt/swapfile', workflow)
-        self.assertIn('DockerRootDir', workflow)
-        for setting in ('remove-dotnet: \'true\'', 'remove-android: \'true\'',
-                        'remove-haskell: \'true\'', 'remove-codeql: \'true\'',
-                        'remove-docker-images: \'true\''):
-            self.assertIn(setting, workflow)
-        self.assertIn('MINIMUM=$((40 * 1024 * 1024 * 1024))', (ROOT / 'scripts/preflight.sh').read_text())
+        self.assertIn('timeout-minutes: 45', workflow)
+        self.assertIn('kobo-android-kitkat-arm32-experimental', workflow)
+        self.assertNotIn('maximize-build-space', workflow)
+        self.assertNotIn('scripts/01-source.sh', workflow)
+        self.assertNotIn('scripts/02-aosp.sh', workflow)
+
+    def test_prebuilt_sources_are_pinned_and_checksum_verified(self):
+        script = (ROOT / 'scripts/00-prebuilt-sdk.sh').read_text()
+        self.assertIn('sysimg_armv7a-19_r03.zip', script)
+        self.assertIn('android-ndk-r10e-linux-x86_64.zip', script)
+        self.assertIn('c1d4d7f49348ffc845e82267006d308e0a50e19411f27e00b894886b4e131627', script)
+        self.assertIn('ee5f405f3b57c4f5c3b3b8b5d495ae12b660e03d2112e4ed5c728d349f1e520c', script)
+        self.assertIn('sha256sum --check', script)
 
 
 class RootfsTests(unittest.TestCase):
@@ -207,6 +207,8 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(info.mode & 0o777, 0o755)
             manifest = json.load(tar.extractfile('manifest.json'))
             self.assertFalse(manifest['hardware_tested'])
+            self.assertIn('prebuilt Android SDK emulator system image', manifest['source_type'])
+            self.assertIn('experimental', manifest['source_type'])
         with zipfile.ZipFile(self.dist / 'android-kobo.zip') as zipped:
             self.assertIn('.adds/android/rootfs.img.gz', zipped.namelist())
         for line in (self.dist / 'pkg/SHA256SUMS').read_text().splitlines():

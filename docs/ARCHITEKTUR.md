@@ -1,6 +1,6 @@
 # Architektur und Grenzen
 
-Dieses Projekt erzeugt ein eigenes AOSP-Android-4.4.4-ARM32-Userspace für einen Chroot. Es erzeugt **keine startfähige Kobo-Ersatzfirmware**, keinen Kernel und kein Flash-Image. Der vorhandene Kobo-Linux-Kernel bleibt aktiv. Damit werden weder Bootloader noch Secure Boot verändert. Für den Libra Colour sind signierte Bootloader-/Kernel-Images dokumentiert; ein Userspace-Projekt kann diese Grenze nicht durch einen Framebuffer-Shim aufheben. [1]
+Dieses Projekt passt ein vorgefertigtes generisches Android-4.4.4-ARM32-SDK-Emulator-Userspace für einen Chroot an. Es erzeugt **keine startfähige Kobo-Ersatzfirmware**, keinen Kernel und kein Flash-Image. Der vorhandene Kobo-Linux-Kernel bleibt aktiv. Damit werden weder Bootloader noch Secure Boot verändert. Für den Libra Colour sind signierte Bootloader-/Kernel-Images dokumentiert; ein Userspace-Projekt kann diese Grenze nicht durch einen Framebuffer-Shim aufheben. [1]
 
 ## Bild und Eingabe
 
@@ -16,7 +16,7 @@ Der lokale VNC-Endpunkt verwendet keine Authentifizierung. Das ist nur wegen der
 
 `android.sh` mountet ausschließlich unter seinem eigenen `run/`-Verzeichnis: das ext4-Image und kleine temporäre Dateisysteme für Geräte und Bilddaten. `kobo-container` fordert einen privaten Mount- und PID-Namespace an. Erst dessen Kindprozess mit PID 1 darf das eigens angepasste Android-`/init` starten. Ein Fehler beim Erzeugen der Namespaces führt zum Abbruch, nicht zum Start von Android-init im Kobo-Hostsystem.
 
-Die frühe Android-init-Mount-/SELinux-Sequenz wird für dieses spezielle Produkt angepasst. Sie darf insbesondere keine Host-SELinux-Policy laden und keine Host-`/dev`-, `/proc`- oder `/sys`-Mounts verändern. Die Property-Infrastruktur und die Verwaltung der Android-Dienste bleiben erhalten. Die Originalquelle des KitKat-init ist die Grundlage dieses gezielten Patches. [3]
+Die Emulator-Ramdisk wird übernommen, ihre generische Emulator-`init.rc` aber durch die kleine isolierte Kobo-Init-Konfiguration ersetzt. Sie darf insbesondere keine Host-SELinux-Policy laden und keine Host-`/dev`-, `/proc`- oder `/sys`-Mounts verändern. Die Property-Infrastruktur und die Verwaltung der Android-Dienste bleiben erhalten. Ein echter Start unter dem Kobo-Kernel muss noch auf Hardware nachgewiesen werden. [3]
 
 Die Aufteilung ist keine Sicherheitsgrenze für bösartige Root-Prozesse: Es gibt weder einen eigenen Kernel noch vollständige Capability-, Netzwerk- oder Binder-Isolation. Android nutzt den Host-Netzwerkstack. Kein Play Store, keine Google-Dienste und keine moderne TLS-/Web-Kompatibilität werden zugesichert. KitKat ist veraltet; nur offline und mit vertrauenswürdigen APKs experimentieren.
 
