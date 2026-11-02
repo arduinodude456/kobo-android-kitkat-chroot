@@ -178,8 +178,9 @@ int kobo_input_key(struct kobo_input *i, uint32_t sym, int down)
 
 struct binder_version_kitkat { int32_t protocol_version; };
 #define KITKAT_BINDER_VERSION _IOWR('b', 9, struct binder_version_kitkat)
-#define KOBO_ASHMEM_SET_SIZE _IOW('a', 3, size_t)
-#define KOBO_ASHMEM_GET_SIZE _IO('a', 4)
+/* Android ashmem uses the Linux UAPI magic 0x77 ('w'), not 'a'. */
+#define KOBO_ASHMEM_SET_SIZE _IOW(0x77, 3, size_t)
+#define KOBO_ASHMEM_GET_SIZE _IO(0x77, 4)
 static const char *device_env(const char *env, const char *fallback)
 {
     const char *p = getenv(env); return p && *p ? p : fallback;
