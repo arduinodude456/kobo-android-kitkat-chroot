@@ -21,6 +21,11 @@
 #ifndef CLONE_NEWPID
 #define CLONE_NEWPID 0x20000000
 #endif
+/* API-19's sys/mount.h omits the mount-propagation flags, although the
+ * kernel ABI supports them. MS_PRIVATE is (1 << 18) in Linux mount.h. */
+#ifndef MS_PRIVATE
+#define MS_PRIVATE (1 << 18)
+#endif
 static volatile sig_atomic_t child_pid;
 static void terminate_child(int sig) {
     (void)sig;
