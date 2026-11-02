@@ -57,6 +57,7 @@ static int isolated(const char *root, int check) {
     pid_t p;
     int status;
     int unsafe = unsafe_no_namespaces();
+    if (!check) fputs("kobo-container: proc-mount fallback build 2026-11-02\n", stderr);
     if (syscall(__NR_unshare, CLONE_NEWNS | CLONE_NEWPID) < 0) {
         if (!unsafe) die("unshare: kernel needs CONFIG_NAMESPACES, CONFIG_PID_NS and CONFIG_MNT_NS");
         fputs("WARNING: starting without mount/PID namespace isolation\n", stderr);

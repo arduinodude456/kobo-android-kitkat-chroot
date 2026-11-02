@@ -67,7 +67,7 @@ jobs:
       - name: Upload install package
         uses: actions/upload-artifact@v4
         with:
-          name: kobo-android-lollipop-arm32-experimental
+          name: kobo-android-lollipop-arm32-${{ github.sha }}
           if-no-files-found: error
           compression-level: 0
           path: |

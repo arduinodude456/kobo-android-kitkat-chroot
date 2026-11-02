@@ -117,6 +117,10 @@ COMMON=(--sysroot="$SYSROOT" -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16 -
 "$CC" "${COMMON[@]}" "$ROOT/native/kobo_vnc.c" "$ROOT/native/kobo_fb.c" \
     "$ROOT/native/kobo_input.c" -static -pthread -lm -o "$NATIVE/kobo-vnc"
 "$CC" "${COMMON[@]}" "$ROOT/runtime/kobo-container.c" -static -o "$NATIVE/kobo-container"
+grep -aF 'proc-mount fallback build 2026-11-02' "$NATIVE/kobo-container" >/dev/null || {
+    echo 'kobo-container binary was not rebuilt from the current source' >&2
+    exit 1
+}
 sudo install -o root -g root -m 0644 "$NATIVE/libkobofb.so" "$PRODUCT/system/lib/libkobofb.so"
 sudo install -o root -g root -m 0755 "$NATIVE/kobo-vnc" "$PRODUCT/system/bin/kobo-vnc"
 sudo install -o root -g root -m 0755 "$NATIVE/kobo-container" "$PRODUCT/system/bin/kobo-container"
