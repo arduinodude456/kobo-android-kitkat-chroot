@@ -1,0 +1,111 @@
+name: Android 4.4.4 ARM32 chroot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-kitkat-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install small validation toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3 python3-yaml luajit shellcheck
+      - name: Check scripts and run host-only tests
+        run: |
+          set -euo pipefail
+          for script in scripts/*.sh runtime/*.sh; do bash -n "$script"; done
+          python3 -m compileall -q scripts tests
+          make -C native test
+          python3 -m unittest discover -s tests -p 'test_*.py' -v
+          if [[ -f tests/test_lua.lua ]]; then luajit tests/test_lua.lua; fi
+          # Sourced legacy envsetup and runtime BusyBox code have their own dialect.
+          shellcheck -S error scripts/*.sh
+
+  build:
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      JOBS: '2'
+      ROOTFS_SIZE_MIB: '768'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Recover disk on this disposable hosted runner
+        run: |
+          set -euo pipefail
+          # Never use this pruning step on a personal or persistent machine.
+          df -h
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /opt/hostedtoolcache /usr/local/share/boost /usr/local/share/powershell \
+            /opt/google/chrome /opt/microsoft/msedge
+          docker system prune -af
+          sudo apt-get clean
+          df -h
+      - name: Install modern host sync and ext4 packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git curl ca-certificates python3 gnupg \
+            e2fsprogs rsync file binutils gzip
+      - name: Preflight minimum 60 GiB free space
+        run: scripts/preflight.sh
+      - name: Shallow sync pinned AOSP on host Python 3
+        run: |
+          set -o pipefail
+          scripts/01-source.sh 2>&1 | tee build/logs/source.log
+      - name: Build real ARM32 AOSP in Ubuntu 14.04 OpenJDK 7 container
+        run: |
+          set -o pipefail
+          scripts/02-aosp.sh 2>&1 | tee build/logs/aosp-build.log
+      - name: Build ownership-correct ext4 chroot image
+        run: |
+          set -o pipefail
+          scripts/03-rootfs.sh 2>&1 | tee build/logs/rootfs.log
+      - name: Package runtime and verify manifest inputs
+        run: |
+          set -o pipefail
+          scripts/04-package.sh 2>&1 | tee build/logs/package.log
+      - name: Upload install package
+        uses: actions/upload-artifact@v4
+        with:
+          name: kobo-android-kitkat-arm32
+          if-no-files-found: error
+          compression-level: 0
+          path: |
+            dist/android-kobo.zip
+            dist/android-kobo.zip.sha256
+            dist/kobo-android-kitkat.tar.gz
+            dist/kobo-android-kitkat.tar.gz.sha256
+      - name: Upload provenance and logs even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-provenance-and-logs
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            build/logs/
+            build/source-manifest.xml
+            build/AOSP-RELEASE.txt
+            build/REPO-REVISION.txt
+            build/patches.json
+            build/build-container.json
+            build/rootfs-fs-config.txt
+            build/rootfs.size

@@ -1,0 +1,32 @@
+# Gepinnte Quellen und bewusste Anpassungen
+
+Die Pipeline baut Android aus AOSP-Quellen; sie lädt kein fertiges Android-Abbild herunter. Das Manifest ist auf `android-4.4.4_r2` festgelegt. `repo manifest -r` dokumentiert im CI-Artefakt die aufgelösten Commit-IDs aller Teilprojekte. Repo selbst verwendet den Commit `97dc5c1bd9527c2abe2183b16a4b7ef037dc34a7` der Version v2.54 und läuft auf dem modernen Host mit Python 3. Kompiliert wird ausschließlich im Ubuntu-14.04-amd64-Container mit dem unveränderlichen Digest `sha256:881afbae521c910f764f7187dbfbca3cc10c26f8bafa458c76dda009a901c29d`.
+
+Die offiziellen historischen AOSP-Anweisungen nennen für KitKat Ubuntu 12.04 und Oracle JDK 6. Ubuntu 14.04 mit OpenJDK 7 ist hier eine ausdrücklich dokumentierte Kompatibilitätsanpassung: `patch_aosp.py` prüft die SHA-256-Werte der Originaldateien, entfernt die Beschränkung auf Oracle und stellt die Java-Versionsprüfung auf 1.7 um. Das Java-Quell- und Bytecodeziel bleibt unverändert. Dies ist keine Behauptung offizieller Upstream-Unterstützung. Die vollständige Containerkompilierung muss noch erfolgreich in CI ausgeführt werden. [1] [2]
+
+Der dedizierte Init-Patch erhält die Property-Initialisierung, den Property-Dienst und die Signal-/Prozessverwaltung. Er überspringt frühe Mounts für `/dev`, `/proc`, `/sys` und `devpts`, damit die Laufzeitumgebung ihre privaten Mounts vorbereiten kann. Host-Hardwareerkennung, Kernel-Cmdline und SELinux-Initialisierung werden nicht übernommen; insbesondere wird keine Host-Policy geladen oder umgelabelt. Die eigene `init.rc` importiert ausschließlich die beim Build erzeugte `init.environ.rc` mit dem passenden Bootclasspath. KitKat stellt `post-fs-data` und `boot` direkt in `init.c` in die Warteschlange; ein zusätzlicher `late-init`-Trigger wie bei neueren Android-Versionen ist hier nicht erforderlich. Das ist dennoch keine Sicherheitsisolierung für bösartige Root-Anwendungen. [3]
+
+KitKat enthält `libGLES_android` für Software-GLES sowie GLES-1.0-/1.1-Fallbacks in SurfaceFlingers RenderEngine. Goldfish-GLES-Emulation wird nicht gebaut. `gralloc.default` öffnet `/dev/graphics/fb0` beziehungsweise `/dev/fb0`; die native Preload-Bibliothek leitet diese Aufrufe auf den gemeinsamen RGB565-Puffer um. Zusätzlich deaktiviert ein hash-geprüfter Patch `HardwareRenderer` global: sowohl Verfügbarkeitsprüfung und Erzeugung des GLES2-Renderers als auch die Standardflags sind abgeschaltet. Manifest-Anforderungen von Launcher oder SystemUI dürfen daher nicht versehentlich GLES2-HWUI einschalten. Apps mit eigener GLES2-Ausgabe werden nicht unterstützt. [4] [5] [6] [8]
+
+`core_base.mk` erhält die vom Framework benötigten Boot-JARs. Nicht benötigte ausführbare Dienste werden nach der Produktvererbung herausgefiltert. `mediaserver` und die Dummy-Audio-HALs bleiben für Framework-Abhängigkeiten enthalten; echte Kobo-Audiogeräte werden nicht freigegeben. Die VNC- und Container-Helfer werden vollständig statisch gegen AOSP-Bionic gebaut; die Paketprüfung lehnt einen dynamischen ELF-Interpreter ab. Ihr tatsächliches Verhalten auf dem Kobo ist weiterhin durch einen Gerätetest nachzuweisen. Der Lunch-Name lautet `kobo_libra_colour-userdebug`; aufgrund von `PRODUCT_DEVICE=libra_colour` liegt das echte Build-Ergebnis unter `out/target/product/libra_colour`. [7]
+
+Das Paket enthält ein ext4-Abbild, weil die FAT-Partition des Kobo Android-Symlinks, Eigentümer und Rechte nicht erhalten kann. Die gebauten Verzeichnisse `root/` und `system/` werden mit der tatsächlich gebauten AOSP-Version von `fs_config` normalisiert und mit den modernen Host-e2fsprogs abgebildet. Der konservative ext4-Featuresatz schließt moderne 64-Bit-, Metadatenprüfsummen- und Orphan-File-Features aus. Kernel, Recovery und vorhandene Partitionen werden nicht geflasht.
+
+## Workflow und Artefakte
+
+Der GitHub-Actions-Workflow heißt **Android 4.4.4 ARM32 chroot**. Pull Requests führen nur die kleinen Hosttests aus. Ein Push auf `main` oder `workflow_dispatch` startet zusätzlich den vollständigen Quellbuild, begrenzt auf zwei parallele Jobs und 350 Minuten. Vor dem Download werden mindestens 60 GiB freier Speicher geprüft. Das Aufräumen vorinstallierter SDKs ist ausschließlich für den wegwerfbaren GitHub-Runner vorgesehen. Diese Mindestprüfung garantiert nicht, dass jeder kostenlose Runner genügend Speicher oder Laufzeit bietet; gegebenenfalls ist ein größerer Runner nötig.
+
+Das Installationsartefakt heißt **kobo-android-kitkat-arm32** und enthält `dist/android-kobo.zip` sowie alternativ `dist/kobo-android-kitkat.tar.gz`, jeweils mit SHA-256-Datei. Beide enthalten denselben Payload einschließlich `.adds/android/rootfs.img.gz`. Das zusätzliche Artefakt **android-build-provenance-and-logs** enthält aufgelöste Quellen, Patch-Hashes, Containerinformationen und Buildprotokolle; es wird auch bei Fehlern hochgeladen.
+
+Die lokalen Tests verwenden ausdrücklich gekennzeichnete Fixtures. Sie prüfen unter anderem Fehlerabbruch, Paketstruktur und ELF-Merkmale, ersetzen aber weder einen vollständigen AOSP-Build noch einen Android-Boot auf Kobo-Hardware.
+
+## Quellen
+
+[1]: https://source.android.com/docs/setup/start/older-versions "Historische AOSP-Hostanforderungen"
+[2]: https://android.googlesource.com/platform/build/+/android-4.4.4_r2/core/main.mk "Gepinnte KitKat-Buildregeln und Java-Versionsprüfung"
+[3]: https://android.googlesource.com/platform/system/core/+/android-4.4.4_r2/init/init.c "Gepinnter Init-Startablauf und Ereignisschleife"
+[4]: https://android.googlesource.com/platform/frameworks/native/+/android-4.4.4_r2/opengl/libagl/Android.mk "Android-Software-GLES-Modul"
+[5]: https://android.googlesource.com/platform/frameworks/native/+/android-4.4.4_r2/services/surfaceflinger/RenderEngine/RenderEngine.cpp "GLES1-Fallback in KitKat-RenderEngine"
+[6]: https://android.googlesource.com/platform/hardware/libhardware/+/android-4.4.4_r2/modules/gralloc/framebuffer.cpp "Standard-Framebuffer-Gralloc"
+[7]: https://android.googlesource.com/platform/build/+/android-4.4.4_r2/target/product/core_base.mk "Framework-Basisprodukt"
+[8]: https://android.googlesource.com/platform/frameworks/base/+/android-4.4.4_r2/core/java/android/view/HardwareRenderer.java "KitKat-HWUI-Verfügbarkeitsprüfung"

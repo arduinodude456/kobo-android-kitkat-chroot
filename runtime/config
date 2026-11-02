@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: MIT
+# Trusted shell configuration; do not copy arbitrary downloaded shell commands here.
+# Kernel devices must already exist. The launcher never loads unverified modules.
+KOBO_BINDER_DEVICE=/dev/binder
+KOBO_ASHMEM_DEVICE=/dev/ashmem
+# Display is deliberately fixed to 600x800 RGB565 in this low-RAM build.
+# VNC is deliberately fixed to IPv4 loopback 127.0.0.1:5963 (no network password).
