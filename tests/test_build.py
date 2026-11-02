@@ -94,6 +94,23 @@ class PatcherTests(unittest.TestCase):
         self.assertNotIn('|| git clone', source)
 
 
+class WorkflowTests(unittest.TestCase):
+    def test_runner_space_is_reclaimed_before_checkout_and_preflight(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        reclaim = workflow.index('uses: easimon/maximize-build-space@')
+        checkout = workflow.index('uses: actions/checkout@v4', workflow.index('  build:'))
+        preflight = workflow.index('run: scripts/preflight.sh')
+        self.assertLess(reclaim, checkout)
+        self.assertLess(checkout, preflight)
+        self.assertIn("if: github.event_name == 'workflow_dispatch'", workflow)
+        self.assertRegex(workflow, r'easimon/maximize-build-space@[0-9a-f]{40}')
+        for setting in ('remove-dotnet: \'true\'', 'remove-android: \'true\'',
+                        'remove-haskell: \'true\'', 'remove-codeql: \'true\'',
+                        'remove-docker-images: \'true\''):
+            self.assertIn(setting, workflow)
+        self.assertIn('MINIMUM=$((60 * 1024 * 1024 * 1024))', (ROOT / 'scripts/preflight.sh').read_text())
+
+
 class RootfsTests(unittest.TestCase):
     def test_static_arm_elf_validation(self):
         with tempfile.TemporaryDirectory() as tmp:

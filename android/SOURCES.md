@@ -14,7 +14,9 @@ Das Paket enthält ein ext4-Abbild, weil die FAT-Partition des Kobo Android-Syml
 
 ## Workflow und Artefakte
 
-Der GitHub-Actions-Workflow heißt **Android 4.4.4 ARM32 chroot**. Pull Requests führen nur die kleinen Hosttests aus. Ein Push auf `main` oder `workflow_dispatch` startet zusätzlich den vollständigen Quellbuild, begrenzt auf zwei parallele Jobs und 350 Minuten. Vor dem Download werden mindestens 60 GiB freier Speicher geprüft. Das Aufräumen vorinstallierter SDKs ist ausschließlich für den wegwerfbaren GitHub-Runner vorgesehen. Diese Mindestprüfung garantiert nicht, dass jeder kostenlose Runner genügend Speicher oder Laufzeit bietet; gegebenenfalls ist ein größerer Runner nötig.
+Der GitHub-Actions-Workflow heißt **Android 4.4.4 ARM32 chroot**. Pull Requests und Pushes auf `main` führen nur die kleinen Hosttests aus; nur `workflow_dispatch` startet den vollständigen Quellbuild. Dieser ist auf zwei parallele Jobs und 350 Minuten begrenzt. Vor dem Checkout wird die Drittanbieter-Composite-Action `easimon/maximize-build-space` auf den unveränderlichen Commit `fc881a613ad2a34aca9c9624518214ebc21dfc0c` gepinnt ausgeführt. Sie entfernt für diesen Job unnötige SDK-/Toolchain-Verzeichnisse, verbindet den freien Platz von `/` und `/mnt` über LVM und lässt 6 GiB auf `/` sowie 2 GiB Swap reserviert. Der anschließende Preflight verlangt 60 GiB frei im Build-Arbeitsbereich. Das kann den Platz auf einem gewöhnlichen Runner erheblich erhöhen, ist aber keine von GitHub garantierte Kapazität: die Drittanbieter-Action hängt von undokumentiertem Runner-LVM-/Loop-Setup ab. Der Lauf kann deshalb noch vor dem AOSP-Sync sauber abbrechen, wenn die tatsächliche Kapazität nicht reicht.
+
+Das Dateisystem-Cleanup gilt ausschließlich für den wegwerfbaren GitHub-Runner. Die Action wird vor `checkout` aufgerufen, weil sie den Inhalt des Arbeitsverzeichnisses durch ein neues Build-Dateisystem ersetzt. Docker und apt-Caches werden danach erneut bereinigt; SDKs oder Toolchains löscht der eigene Job anschließend nicht mehr.
 
 Das Installationsartefakt heißt **kobo-android-kitkat-arm32** und enthält `dist/android-kobo.zip` sowie alternativ `dist/kobo-android-kitkat.tar.gz`, jeweils mit SHA-256-Datei. Beide enthalten denselben Payload einschließlich `.adds/android/rootfs.img.gz`. Das zusätzliche Artefakt **android-build-provenance-and-logs** enthält aufgelöste Quellen, Patch-Hashes, Containerinformationen und Buildprotokolle; es wird auch bei Fehlern hochgeladen.
 
@@ -30,3 +32,5 @@ Die lokalen Tests verwenden ausdrücklich gekennzeichnete Fixtures. Sie prüfen 
 [6]: https://android.googlesource.com/platform/hardware/libhardware/+/android-4.4.4_r2/modules/gralloc/framebuffer.cpp "Standard-Framebuffer-Gralloc"
 [7]: https://android.googlesource.com/platform/build/+/android-4.4.4_r2/target/product/core_base.mk "Framework-Basisprodukt"
 [8]: https://android.googlesource.com/platform/frameworks/base/+/android-4.4.4_r2/core/java/android/view/HardwareRenderer.java "KitKat-HWUI-Verfügbarkeitsprüfung"
+[9]: https://github.com/easimon/maximize-build-space/tree/fc881a613ad2a34aca9c9624518214ebc21dfc0c "Gepinnte Drittanbieter-Action zur temporären Build-Volume-Erweiterung"
+[10]: https://docs.github.com/en/actions/reference/runners/github-hosted-runners "GitHub-Standardrunner-Spezifikationen"

@@ -39,7 +39,7 @@ jobs:
           shellcheck -S error scripts/*.sh
 
   build:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'workflow_dispatch'
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 350
@@ -47,18 +47,26 @@ jobs:
       JOBS: '2'
       ROOTFS_SIZE_MIB: '768'
     steps:
+      - name: Combine disposable runner disks and reclaim build space
+        uses: easimon/maximize-build-space@fc881a613ad2a34aca9c9624518214ebc21dfc0c # v10, immutable commit pin
+        with:
+          root-reserve-mb: 6144
+          temp-reserve-mb: 512
+          swap-size-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
       - uses: actions/checkout@v4
-      - name: Recover disk on this disposable hosted runner
+      - name: Prune Docker and apt caches on this disposable hosted runner
         run: |
           set -euo pipefail
-          # Never use this pruning step on a personal or persistent machine.
-          df -h
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
-            /opt/hostedtoolcache /usr/local/share/boost /usr/local/share/powershell \
-            /opt/google/chrome /opt/microsoft/msedge
+          # Only harmless caches: never delete SDK/toolchain directories here.
+          df -h "$GITHUB_WORKSPACE" /
           docker system prune -af
           sudo apt-get clean
-          df -h
+          df -h "$GITHUB_WORKSPACE" /
       - name: Install modern host sync and ext4 packaging tools
         run: |
           sudo apt-get update
