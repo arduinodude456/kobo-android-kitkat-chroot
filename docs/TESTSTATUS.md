@@ -1,10 +1,10 @@
 # Prüfstand des experimentellen Prebuilt-Builds
 
-Stand: 2. November 2026. Der CI-Pfad wurde von einem vollständigen AOSP-Quellbuild auf ein verifiziertes Android-4.4.4-ARM-Emulator-Systemimage umgestellt. **Die neue GitHub-Actions-Pipeline wurde noch nicht ausgeführt und ein echter Libra Colour stand nicht zum Testen zur Verfügung.** Das Ergebnis bleibt ein experimenteller Chroot-Portierungsversuch.
+Stand: 2. November 2026. Der CI-Pfad wurde von einem vollständigen AOSP-Quellbuild auf ein verifiziertes Android-5.0.2-ARM-Emulator-Systemimage umgestellt. **Die neue GitHub-Actions-Pipeline wurde noch nicht ausgeführt und ein echter Libra Colour stand nicht zum Testen zur Verfügung.** Das Ergebnis bleibt ein experimenteller Chroot-Portierungsversuch.
 
 ## Bereits geprüft
 
-Das offizielle Google-SDK-Archiv `sysimg_armv7a-19_r03.zip` wurde heruntergeladen. Seine SHA-256-Prüfsumme stimmt mit `c1d4d7f49348ffc845e82267006d308e0a50e19411f27e00b894886b4e131627` überein. Das Image enthält Android 4.4.4/API 19 ARM EABI v7a, ext4 `/system`, Ramdisk, Emulator-Kernel und Android-Apps. Die nötigen Framework-Apps, Software-GLES, Default-Gralloc und Android-Notice-Datei wurden in der Partition gefunden. Der Emulator-Kernel wird nicht übernommen; die EGL-Konfiguration und Emulator-Emulationsbibliotheken werden angepasst.
+Das offizielle Google-SDK-Archiv `armeabi-v7a-21_r04.zip` wurde heruntergeladen. Seine SHA-256-Prüfsumme stimmt mit `4f20bb4abff1fcda7fdde510993d2004b0ca330ae6e7a798ffecc3fbf6d48520` überein. Das Image enthält Android 5.0.2/API 21 ARM EABI v7a, ext4 `/system`, Ramdisk, Emulator-Kernel und Android-Apps. Die nötigen Framework-Apps, Software-GLES, Default-Gralloc und Android-Notice-Datei wurden in der Partition gefunden. Der Emulator-Kernel wird nicht übernommen; die EGL-Konfiguration und Emulator-Emulationsbibliotheken werden angepasst.
 
 Das offizielle Android-NDK r10e wurde heruntergeladen. Die SHA-256-Prüfsumme ist `ee5f405f3b57c4f5c3b3b8b5d495ae12b660e03d2112e4ed5c728d349f1e520c`. Der Compiler kann in dieser ARM64-Entwicklungsumgebung nicht ausgeführt werden, da das historische NDK ausschließlich einen x86-64-Hostcompiler enthält. GitHub `ubuntu-24.04` ist x86-64; die eigentliche Bionic-Kompilierung muss dort im ersten CI-Lauf verifiziert werden.
 

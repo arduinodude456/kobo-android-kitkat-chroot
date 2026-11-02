@@ -70,7 +70,7 @@ def prepare(product, stage):
     for name in ('dev', 'dev/socket', 'dev/pts', 'dev/kobo', 'dev/input', 'proc', 'sys',
                  'data', 'cache', 'mnt', 'storage', 'storage/emulated', 'storage/emulated/0'):
         (stage / name).mkdir(parents=True, exist_ok=True)
-    (stage / 'kobo-chroot').write_text('android-4.4.4_r2\n')
+    (stage / 'kobo-chroot').write_text('android-5.0.2_api21\n')
     validate(stage)
 
 

@@ -176,8 +176,8 @@ int kobo_input_key(struct kobo_input *i, uint32_t sym, int down)
     i->keys[code] = !!down; return 0;
 }
 
-struct binder_version_kitkat { int32_t protocol_version; };
-#define KITKAT_BINDER_VERSION _IOWR('b', 9, struct binder_version_kitkat)
+struct binder_version_lollipop { int32_t protocol_version; };
+#define LOLLIPOP_BINDER_VERSION _IOWR('b', 9, struct binder_version_lollipop)
 /* Android ashmem uses the Linux UAPI magic 0x77 ('w'), not 'a'. */
 #define KOBO_ASHMEM_SET_SIZE _IOW(0x77, 3, size_t)
 #define KOBO_ASHMEM_GET_SIZE _IO(0x77, 4)
@@ -189,15 +189,15 @@ int kobo_probe(void)
 {
     int failed = 0, fd, status; pid_t pid; struct kobo_input input;
     const char *p = device_env("KOBO_BINDER_DEVICE", "/dev/binder");
-    struct binder_version_kitkat v;
+    struct binder_version_lollipop v;
     fd = open(p, O_RDWR | O_CLOEXEC); memset(&v, 0, sizeof(v));
     if (fd < 0) { fprintf(stderr, "binder: cannot open %s: %s\n", p, strerror(errno)); failed = 1; }
     else {
-        if (ioctl(fd, KITKAT_BINDER_VERSION, &v) < 0) {
+        if (ioctl(fd, LOLLIPOP_BINDER_VERSION, &v) < 0) {
             fprintf(stderr, "binder: BINDER_VERSION on %s: %s\n", p, strerror(errno)); failed = 1;
         } else if (v.protocol_version != 7) {
-            fprintf(stderr, "binder: protocol %d, need KitKat ARM32 protocol 7 (not binder64/8)\n", v.protocol_version); failed = 1;
-        } else fprintf(stderr, "binder: protocol 7 OK\n");
+            fprintf(stderr, "binder: protocol %d, need Android ARM32 protocol 7 (not binder64/8)\n", v.protocol_version); failed = 1;
+        } else fprintf(stderr, "binder: ARM32 protocol 7 OK\n");
         close(fd);
     }
     p = device_env("KOBO_ASHMEM_DEVICE", "/dev/ashmem");

@@ -2,17 +2,17 @@
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 
-SDK_URL='https://dl.google.com/android/repository/sys-img/android/sysimg_armv7a-19_r03.zip'
-SDK_SHA256='c1d4d7f49348ffc845e82267006d308e0a50e19411f27e00b894886b4e131627'
+SDK_URL='https://dl.google.com/android/repository/sys-img/android/armeabi-v7a-21_r04.zip'
+SDK_SHA256='4f20bb4abff1fcda7fdde510993d2004b0ca330ae6e7a798ffecc3fbf6d48520'
 NDK_URL='https://dl.google.com/android/repository/android-ndk-r10e-linux-x86_64.zip'
 NDK_SHA256='ee5f405f3b57c4f5c3b3b8b5d495ae12b660e03d2112e4ed5c728d349f1e520c'
 DOWNLOADS="$BUILD/downloads"
-SDK_ZIP="$DOWNLOADS/sdk19-arm.zip"
+SDK_ZIP="$DOWNLOADS/sdk21-arm.zip"
 NDK_ZIP="$DOWNLOADS/android-ndk-r10e.zip"
-SDK_DIR="$BUILD/sdk19"
+SDK_DIR="$BUILD/sdk21"
 NDK_DIR="$BUILD/ndk10"
 PRODUCT="$AOSP_DIR/out/target/product/libra_colour"
-MOUNT="$BUILD/sdk19-mount"
+MOUNT="$BUILD/sdk21-mount"
 mkdir -p "$DOWNLOADS" "$BUILD/logs"
 
 fetch_verified() {
@@ -30,11 +30,11 @@ mkdir -p "$SDK_DIR" "$NDK_DIR" "$PRODUCT/root" "$PRODUCT/system" "$MOUNT"
 unzip -q "$SDK_ZIP" -d "$SDK_DIR"
 unzip -q "$NDK_ZIP" \
     'android-ndk-r10e/toolchains/arm-linux-androideabi-4.8/prebuilt/linux-x86_64/*' \
-    'android-ndk-r10e/platforms/android-19/arch-arm/*' -d "$NDK_DIR"
+    'android-ndk-r10e/platforms/android-21/arch-arm/*' -d "$NDK_DIR"
 
 SDK_IMAGE="$SDK_DIR/armeabi-v7a"
 [[ -s "$SDK_IMAGE/system.img" && -s "$SDK_IMAGE/ramdisk.img" ]] || {
-    echo 'Pinned SDK archive did not contain the expected API-19 ARM image' >&2; exit 1;
+    echo 'Pinned SDK archive did not contain the expected API-21 ARM image' >&2; exit 1;
 }
 # Extract the ramdisk as root so its Android uid/gid and modes are retained.
 gzip -dc "$SDK_IMAGE/ramdisk.img" | (cd "$PRODUCT/root" && sudo cpio -idm --quiet --no-absolute-filenames)
@@ -107,7 +107,7 @@ printf '0 0 android\n' | sudo tee "$PRODUCT/system/lib/egl/egl.cfg" >/dev/null
 sudo find "$PRODUCT/system/lib" -type f -name '*_emulation.so' -delete
 
 CC="$NDK_DIR/android-ndk-r10e/toolchains/arm-linux-androideabi-4.8/prebuilt/linux-x86_64/bin/arm-linux-androideabi-gcc"
-SYSROOT="$NDK_DIR/android-ndk-r10e/platforms/android-19/arch-arm"
+SYSROOT="$NDK_DIR/android-ndk-r10e/platforms/android-21/arch-arm"
 NATIVE="$BUILD/native-arm"
 mkdir -p "$NATIVE"
 COMMON=(--sysroot="$SYSROOT" -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16 -Os -g0 -std=gnu99 -Wall -Wextra -Wformat=2)
@@ -123,15 +123,15 @@ sudo install -o root -g root -m 0755 "$NATIVE/kobo-container" "$PRODUCT/system/b
 
 cat > "$BUILD/source-manifest.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
-<prebuilt id="android-4.4.4-api19-armv7a" source="Google Android SDK system image" url="https://dl.google.com/android/repository/sys-img/android/sysimg_armv7a-19_r03.zip" sha256="c1d4d7f49348ffc845e82267006d308e0a50e19411f27e00b894886b4e131627" />
+<prebuilt id="android-5.0.2-api21-armv7a" source="Google Android SDK system image" url="https://dl.google.com/android/repository/sys-img/android/armeabi-v7a-21_r04.zip" sha256="4f20bb4abff1fcda7fdde510993d2004b0ca330ae6e7a798ffecc3fbf6d48520" />
 EOF
-printf '%s\n' 'Android SDK API 19 ARM EABI v7a system image, build 1743154 (4.4.4)' > "$BUILD/AOSP-RELEASE.txt"
-printf '%s\n' 'prebuilt-system-image-sha256:c1d4d7f49348ffc845e82267006d308e0a50e19411f27e00b894886b4e131627' > "$BUILD/REPO-REVISION.txt"
+printf '%s\n' 'Android SDK API 21 ARM EABI v7a system image, build 3079185 (5.0.2)' > "$BUILD/AOSP-RELEASE.txt"
+printf '%s\n' 'prebuilt-system-image-sha256:4f20bb4abff1fcda7fdde510993d2004b0ca330ae6e7a798ffecc3fbf6d48520' > "$BUILD/REPO-REVISION.txt"
 cat > "$BUILD/patches.json" <<'EOF'
 {"mode":"prebuilt-sdk-adaptation","changes":["replace emulator init with isolated Kobo init","set low-RAM software-rendered Kobo properties","remove emulator EGL/GLES shims","build Bionic framebuffer and Kobo helpers with NDK r10e"]}
 EOF
 cat > "$BUILD/build-container.json" <<'EOF'
-{"mode":"prebuilt-download-and-small-native-build","sdk":"Android 4.4.4 API 19 ARM EABI v7a","ndk":"r10e","aosp-full-source-build":false}
+{"mode":"prebuilt-download-and-small-native-build","sdk":"Android 5.0.2 API 21 ARM EABI v7a","ndk":"r10e","aosp-full-source-build":false}
 EOF
-printf 'Prebuilt API-19 ARM SDK staged; only native helpers were compiled.\n'
+printf 'Prebuilt API-21 ARM SDK staged; only native helpers were compiled.\n'
 df -h "$BUILD" | tee "$BUILD/logs/disk-after-prebuilt.log"

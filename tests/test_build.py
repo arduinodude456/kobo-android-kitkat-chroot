@@ -104,16 +104,16 @@ class WorkflowTests(unittest.TestCase):
         self.assertLess(rootfs, package)
         self.assertIn("if: github.event_name == 'workflow_dispatch'", workflow)
         self.assertIn('timeout-minutes: 45', workflow)
-        self.assertIn('kobo-android-kitkat-arm32-experimental', workflow)
+        self.assertIn('kobo-android-lollipop-arm32-experimental', workflow)
         self.assertNotIn('maximize-build-space', workflow)
         self.assertNotIn('scripts/01-source.sh', workflow)
         self.assertNotIn('scripts/02-aosp.sh', workflow)
 
     def test_prebuilt_sources_are_pinned_and_checksum_verified(self):
         script = (ROOT / 'scripts/00-prebuilt-sdk.sh').read_text()
-        self.assertIn('sysimg_armv7a-19_r03.zip', script)
+        self.assertIn('armeabi-v7a-21_r04.zip', script)
         self.assertIn('android-ndk-r10e-linux-x86_64.zip', script)
-        self.assertIn('c1d4d7f49348ffc845e82267006d308e0a50e19411f27e00b894886b4e131627', script)
+        self.assertIn('4f20bb4abff1fcda7fdde510993d2004b0ca330ae6e7a798ffecc3fbf6d48520', script)
         self.assertIn('ee5f405f3b57c4f5c3b3b8b5d495ae12b660e03d2112e4ed5c728d349f1e520c', script)
         self.assertIn('sha256sum --check', script)
 

@@ -52,11 +52,11 @@ Touch ist Single-Touch über `EV_ABS`, `ABS_X/Y`, `BTN_TOUCH` und `INPUT_PROP_DI
 
 ## Echte Vorprüfung und verbleibende Prüfung
 
-`--check` prüft Binder-Protokoll **7** für KitKat-ARM32, Ashmem-Set/Get-Size-ioctls, Erzeugen/Entfernen beider uinput-Geräte und die Erstellung von Mount-/PID-Namespaces in einem Kindprozess. Pfade: `KOBO_BINDER_DEVICE` und `KOBO_ASHMEM_DEVICE`. Fehlende Geräte, Binder-Protokoll 8, verweigerte Operationen oder fehlende Namespaces führen zum Fehler. `--check --no-input` ist ungültig. Die Prüfung lädt keine Module, mountet keine Dateisysteme und beweist keinen Android-Boot.
+`--check` prüft Binder-Protokoll **7** für Lollipop-ARM32, Ashmem-Set/Get-Size-ioctls, Erzeugen/Entfernen beider uinput-Geräte und die Erstellung von Mount-/PID-Namespaces in einem Kindprozess. Pfade: `KOBO_BINDER_DEVICE` und `KOBO_ASHMEM_DEVICE`. Fehlende Geräte, Binder-Protokoll 8, verweigerte Operationen oder fehlende Namespaces führen zum Fehler. `--check --no-input` ist ungültig. Die Prüfung lädt keine Module, mountet keine Dateisysteme und beweist keinen Android-Boot.
 
-Die echten KitKat-Header wurden gezielt geprüft: [fcntl.h] enthält Fortify-Inlines; der Interposer deaktiviert `_FORTIFY_SOURCE` vor den Includes. [ioctl.h] verwendet `int` für den Request und wird über `__BIONIC__` berücksichtigt. [syscall.h] enthält die benötigten `SYS_*`-Aliase. [uinput.h] enthält die Legacy-API, aber kein `UI_SET_PROPBIT`; der Code ergänzt die fehlende Konstante sowie `INPUT_PROP_DIRECT`. Es werden weder `accept4` noch stat-Zeit64-Felder oder libatomic benötigt. Diese Headerprüfung ist **kein ARM32-Bionic-Compiler-/Linkertest**. Der vollständige AOSP-Build und der Gerätetest bleiben erforderlich.
+Die echten Lollipop-Header wurden gezielt geprüft: [fcntl.h] enthält Fortify-Inlines; der Interposer deaktiviert `_FORTIFY_SOURCE` vor den Includes. [ioctl.h] verwendet `int` für den Request und wird über `__BIONIC__` berücksichtigt. [syscall.h] enthält die benötigten `SYS_*`-Aliase. [uinput.h] enthält die Legacy-API, aber kein `UI_SET_PROPBIT`; der Code ergänzt die fehlende Konstante sowie `INPUT_PROP_DIRECT`. Es werden weder `accept4` noch stat-Zeit64-Felder oder libatomic benötigt. Diese Headerprüfung ist **kein ARM32-Bionic-Compiler-/Linkertest**. Der vollständige AOSP-Build und der Gerätetest bleiben erforderlich.
 
-[fcntl.h]: https://android.googlesource.com/platform/bionic/+/android-4.4.4_r2/libc/include/fcntl.h
-[ioctl.h]: https://android.googlesource.com/platform/bionic/+/android-4.4.4_r2/libc/include/sys/ioctl.h
-[syscall.h]: https://android.googlesource.com/platform/bionic/+/android-4.4.4_r2/libc/include/sys/syscall.h
-[uinput.h]: https://android.googlesource.com/platform/bionic/+/android-4.4.4_r2/libc/kernel/common/linux/uinput.h
+[fcntl.h]: https://android.googlesource.com/platform/bionic/+/android-5.0.2_r1/libc/include/fcntl.h
+[ioctl.h]: https://android.googlesource.com/platform/bionic/+/android-5.0.2_r1/libc/include/sys/ioctl.h
+[syscall.h]: https://android.googlesource.com/platform/bionic/+/android-5.0.2_r1/libc/include/sys/syscall.h
+[uinput.h]: https://android.googlesource.com/platform/bionic/+/android-5.0.2_r1/libc/kernel/common/linux/uinput.h

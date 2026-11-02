@@ -89,7 +89,7 @@ class RuntimeTests(unittest.TestCase):
             stage = base / 'stage'
             with mock.patch.object(builder, 'validate'):
                 builder.prepare(product, stage)
-            self.assertEqual((stage / 'kobo-chroot').read_text(), 'android-4.4.4_r2\n')
+            self.assertEqual((stage / 'kobo-chroot').read_text(), 'android-5.0.2_api21\n')
             self.assertIn('"$ROOTFS/kobo-chroot"', (ROOT / 'runtime/android.sh').read_text())
             self.assertIn('access("/kobo-chroot", F_OK)', (ROOT / 'runtime/kobo-container.c').read_text())
             with self.assertRaises(ValueError):

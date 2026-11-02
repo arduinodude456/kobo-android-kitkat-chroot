@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-/* This translation unit defines libc entry points. KitKat's fortified fcntl.h
+/* This translation unit defines libc entry points. Lollipop's fortified fcntl.h
  * otherwise also defines inline open/openat functions under platform flags. */
 #ifdef _FORTIFY_SOURCE
 #undef _FORTIFY_SOURCE

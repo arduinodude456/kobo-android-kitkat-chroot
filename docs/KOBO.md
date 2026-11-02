@@ -4,9 +4,9 @@ Dieses Dokument beschreibt das **von GitHub Actions erzeugte Installationspaket*
 
 ## Installation
 
-Android vorher beenden und wichtige Kobo-Daten sichern. Nach dem Download des GitHub-Artefakts `kobo-android-kitkat-arm32` dessen enthaltene Datei `android-kobo.zip` auf dem Computer entpacken und ihren `.adds`-Inhalt nach `/mnt/onboard/.adds` kopieren. Dabei auch versteckte Ordner anzeigen lassen. Das ergibt insbesondere `.adds/android/android.sh` und `.adds/koreader/plugins/android.koplugin/main.lua`. Bei einer abweichenden KOReader-Installation den Plugin-Ordner manuell in deren `plugins`-Verzeichnis legen.
+Android vorher beenden und wichtige Kobo-Daten sichern. Nach dem Download des GitHub-Artefakts `kobo-android-lollipop-arm32` dessen enthaltene Datei `android-kobo.zip` auf dem Computer entpacken und ihren `.adds`-Inhalt nach `/mnt/onboard/.adds` kopieren. Dabei auch versteckte Ordner anzeigen lassen. Das ergibt insbesondere `.adds/android/android.sh` und `.adds/koreader/plugins/android.koplugin/main.lua`. Bei einer abweichenden KOReader-Installation den Plugin-Ordner manuell in deren `plugins`-Verzeichnis legen.
 
-Nach dem sicheren Trennen der USB-Verbindung KOReader neu starten. Das Plugin ergänzt im Werkzeugmenü **Android 4.4 (Chroot)**. Es ruft denselben Starter auf wie AppDock. Beim ersten Start wird das komprimierte Rootfs geprüft und entpackt. Dafür zusätzlich zum heruntergeladenen Paket Platz für das unkomprimierte Image und mindestens 64 MiB Reserve lassen.
+Nach dem sicheren Trennen der USB-Verbindung KOReader neu starten. Das Plugin ergänzt im Werkzeugmenü **Android 5.0.2 (Chroot)**. Es ruft denselben Starter auf wie AppDock. Beim ersten Start wird das komprimierte Rootfs geprüft und entpackt. Dafür zusätzlich zum heruntergeladenen Paket Platz für das unkomprimierte Image und mindestens 64 MiB Reserve lassen.
 
 Alternativ von einer Root-Shell auf dem Kobo aus:
 
@@ -39,7 +39,7 @@ Erwartet wird schließlich `1`. Bleibt das aus, ist Android nicht vollständig g
 
 ## APKs und Android-Daten
 
-Es werden keine APKs automatisch aus dem Internet geladen. Für eine vertrauenswürdige, Android-4.4-/API-19-kompatible ARM32-APK kann man sie bei laufendem Android vom Host in das Datenverzeichnis kopieren und lokal installieren:
+Es werden keine APKs automatisch aus dem Internet geladen. Für eine vertrauenswürdige, Android-5.0.2-/API-21-kompatible ARM32-APK kann man sie bei laufendem Android vom Host in das Datenverzeichnis kopieren und lokal installieren:
 
 ```sh
 cp /mnt/onboard/meine-app.apk /mnt/onboard/.adds/android/run/rootfs/data/local/tmp/app.apk
@@ -65,12 +65,12 @@ sh android.sh exec service list
 sh android.sh stop
 ```
 
-KitKat verwendet gegebenenfalls Kernel-Logger-Geräte unter `/dev/log`. Wenn der Kobo diese nicht hat, kann `logcat` leer bleiben. Der private init-Ausgabekanal kann bei noch gemountetem Rootfs unter `run/rootfs/dev/kmsg` liegen. Der reguläre Starter versucht, ihn vor dem Unmount nach `android-init.log` zu sichern. Bei einem hart abgebrochenen Starter kann diese Sicherung fehlen; für eine laufende Diagnose die Datei direkt sichern.
+Lollipop verwendet gegebenenfalls Kernel-Logger-Geräte unter `/dev/log`. Wenn der Kobo diese nicht hat, kann `logcat` leer bleiben. Der private init-Ausgabekanal kann bei noch gemountetem Rootfs unter `run/rootfs/dev/kmsg` liegen. Der reguläre Starter versucht, ihn vor dem Unmount nach `android-init.log` zu sichern. Bei einem hart abgebrochenen Starter kann diese Sicherung fehlen; für eine laufende Diagnose die Datei direkt sichern.
 
 Nach einem abgebrochenen Starter kann `sh android.sh recover` verwaiste Mounts entfernen. Es beendet keine beliebigen Prozesse und erzwingt keine belegten Unmounts. Erkennt es noch aktive verwaiste Android-Prozesse, den Kobo kontrolliert neu starten. Eine Rootfs-Reparatur mit `e2fsck` ausschließlich bei vollständig gestopptem, nicht mehr gemountetem Image durchführen und vorher eine Kopie sichern.
 
 ## Sicherheitsregeln
 
-Android vor dem USB-Datenträgermodus beenden. Während des Betriebs das Image nicht kopieren, austauschen oder verschieben. Keine persönlichen Konten und keine untrusted APKs verwenden. KitKat ist ein historisches, nicht mehr zeitgemäß abgesichertes Betriebssystem. Wenn der Kernel keine Namespaces unterstützt, teilt Android zusätzlich Mount- und PID-Namespace mit dem Kobo-Host; nur mit vertrauenswürdigen Apps und besonders vorsichtig experimentieren. Das Android teilt sich den Host-Netzwerkstack; fehlende Android-Netzwerkeinstellungen sind **keine** Netzwerksperre. Für dieses Experiment WLAN am Kobo ausschalten.
+Android vor dem USB-Datenträgermodus beenden. Während des Betriebs das Image nicht kopieren, austauschen oder verschieben. Keine persönlichen Konten und keine untrusted APKs verwenden. Lollipop ist ein historisches, nicht mehr zeitgemäß abgesichertes Betriebssystem. Wenn der Kernel keine Namespaces unterstützt, teilt Android zusätzlich Mount- und PID-Namespace mit dem Kobo-Host; nur mit vertrauenswürdigen Apps und besonders vorsichtig experimentieren. Das Android teilt sich den Host-Netzwerkstack; fehlende Android-Netzwerkeinstellungen sind **keine** Netzwerksperre. Für dieses Experiment WLAN am Kobo ausschalten.
 
 Die Anwendung schreibt nicht in `.kobo/upgrade`, nicht auf rohe eMMC-/SD-Geräte und nicht in Bootloader- oder Kernel-Partitionen. Trotzdem können ein Absturz, ein voller Datenträger oder unpassende Root-Software Daten beschädigen. Das ist kein Ersatz für ein Backup.
