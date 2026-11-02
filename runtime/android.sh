@@ -90,8 +90,10 @@ run() {
     mounted "$ROOTFS" && fail 'Rootfs ist bereits gemountet.'
     mount -t ext4 -o loop,noatime,nosuid "$BASE/rootfs.img" "$ROOTFS"
     [ -f "$ROOTFS/kobo-chroot" ] || fail 'Falsches Rootfs: Sicherheitsmarker fehlt.'
-    # The official API-21 system image has no host mountpoint directories.
-    # Create them before kobo-container mounts proc in either namespace mode.
+    # Replace image-provided dangling proc/sys symlinks with mountpoint dirs.
+    # The official image may inherit these links from its emulator product.
+    [ ! -L "$ROOTFS/proc" ] || rm -f "$ROOTFS/proc"
+    [ ! -L "$ROOTFS/sys" ] || rm -f "$ROOTFS/sys"
     mkdir -p "$ROOTFS/proc" "$ROOTFS/sys"
     mount -t tmpfs -o size=16m,mode=0755,nosuid tmpfs "$ROOTFS/dev"
     mkdir -p "$ROOTFS/dev/input" "$ROOTFS/dev/socket" "$ROOTFS/dev/graphics" "$ROOTFS/dev/kobo" "$ROOTFS/dev/pts"

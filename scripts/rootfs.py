@@ -69,7 +69,10 @@ def prepare(product, stage):
     shutil.copytree(product / 'system', stage / 'system', symlinks=True)
     for name in ('dev', 'dev/socket', 'dev/pts', 'dev/kobo', 'dev/input', 'proc', 'sys',
                  'data', 'cache', 'mnt', 'storage', 'storage/emulated', 'storage/emulated/0'):
-        (stage / name).mkdir(parents=True, exist_ok=True)
+        mountpoint = stage / name
+        if mountpoint.is_symlink() or mountpoint.is_file():
+            mountpoint.unlink()
+        mountpoint.mkdir(parents=True, exist_ok=True)
     (stage / 'kobo-chroot').write_text('android-5.0.2_api21\n')
     validate(stage)
 
