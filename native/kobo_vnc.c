@@ -215,7 +215,7 @@ static void usage(FILE *f)
         "use an SSH tunnel and trust local processes. --no-input is explicit off-device\n"
         "testing only, never an automatic fallback. Dimensions default to 600x800 or\n"
         "KOBO_FB_WIDTH/KOBO_FB_HEIGHT (1..4096). Existing shared dimensions must match.\n"
-        "--check actually probes binder ABI7, ashmem size, uinput creation and namespaces.\n"
+        "--check probes Binder protocol 7/8, ashmem size, uinput creation and namespaces.\n"
         "Probe paths: KOBO_BINDER_DEVICE and KOBO_ASHMEM_DEVICE.\n");
 }
 static int number(const char *s,unsigned max,unsigned *out)

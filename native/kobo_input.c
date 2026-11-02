@@ -195,9 +195,14 @@ int kobo_probe(void)
     else {
         if (ioctl(fd, LOLLIPOP_BINDER_VERSION, &v) < 0) {
             fprintf(stderr, "binder: BINDER_VERSION on %s: %s\n", p, strerror(errno)); failed = 1;
-        } else if (v.protocol_version != 7) {
-            fprintf(stderr, "binder: protocol %d, need Android ARM32 protocol 7 (not binder64/8)\n", v.protocol_version); failed = 1;
-        } else fprintf(stderr, "binder: ARM32 protocol 7 OK\n");
+        } else if (v.protocol_version != 7 && v.protocol_version != 8) {
+            fprintf(stderr, "binder: unsupported protocol %d, need Android Binder protocol 7 or 8\n", v.protocol_version); failed = 1;
+        } else if (v.protocol_version == 8) {
+            /* The Kobo kernel reports Binder 8 even though this is a 32-bit
+             * API-21 userspace. Let the real framework probe decide whether
+             * the driver/userspace command ABI is usable. */
+            fprintf(stderr, "binder: protocol 8 accepted for API-21 userspace\n");
+        } else fprintf(stderr, "binder: protocol 7 OK\n");
         close(fd);
     }
     p = device_env("KOBO_ASHMEM_DEVICE", "/dev/ashmem");
