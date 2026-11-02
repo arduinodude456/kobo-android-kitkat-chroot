@@ -92,35 +92,3 @@ jobs:
             build/build-container.json
             build/rootfs-fs-config.txt
             build/rootfs.size
-  kernel:
-    if: github.event_name == 'workflow_dispatch'
-    needs: validate
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    env:
-      JOBS: '2'
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install kernel build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bc bison build-essential flex gcc-arm-linux-gnueabihf \
-            libssl-dev libncurses-dev python3 python3-pip curl tar zstd
-          python3 -m pip install --break-system-packages zstandard
-      - name: Build Libra Colour kernel with Android 4.4 Binder ABI
-        run: |
-          set -o pipefail
-          scripts/01-kernel.sh 2>&1 | tee build-kernel.log
-      - name: Upload experimental kernel artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: kobo-libra-colour-kernel-binder32-experimental
-          if-no-files-found: error
-          compression-level: 0
-          path: |
-            build/kernel/zImage
-            build/kernel/zImage.sha256
-            build/kernel/source-commit.txt
-            build/kernel/config-change.txt
-            build/kernel/README.txt
-            build-kernel.log
