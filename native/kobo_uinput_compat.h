@@ -14,6 +14,12 @@
 #ifndef UINPUT_MAX_NAME_SIZE
 #define UINPUT_MAX_NAME_SIZE 80
 #endif
+#ifndef ABS_CNT
+#define ABS_CNT (ABS_MAX + 1)
+#endif
+#ifndef BUS_VIRTUAL
+#define BUS_VIRTUAL 0x06
+#endif
 
 #ifndef UI_SET_EVBIT
 #define UI_SET_EVBIT _IOW(UINPUT_IOCTL_BASE, 100, int)
