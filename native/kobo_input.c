@@ -5,7 +5,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/input.h>
-#include <linux/uinput.h>
+#include "kobo_uinput_compat.h"
 #include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,10 +24,6 @@
 #ifndef INPUT_PROP_DIRECT
 #define INPUT_PROP_DIRECT 0x01
 #endif
-#ifndef UI_SET_PROPBIT
-#define UI_SET_PROPBIT _IOW(UINPUT_IOCTL_BASE, 110, int)
-#endif
-
 static int emit(int fd, unsigned type, unsigned code, int value)
 {
     struct input_event e; ssize_t n;
