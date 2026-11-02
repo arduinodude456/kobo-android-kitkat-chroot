@@ -20,6 +20,39 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+/* Android NDK r10e's ARM32 syscall.h exposes __NR_* constants but does not
+ * provide the SYS_* aliases that glibc normally supplies. Keep the source
+ * usable with both old Bionic and modern libc headers. */
+#ifndef SYS_openat
+#ifdef __NR_openat
+#define SYS_openat __NR_openat
+#endif
+#endif
+#ifndef SYS_close
+#ifdef __NR_close
+#define SYS_close __NR_close
+#endif
+#endif
+#ifndef SYS_dup
+#ifdef __NR_dup
+#define SYS_dup __NR_dup
+#endif
+#endif
+#ifndef SYS_dup2
+#ifdef __NR_dup2
+#define SYS_dup2 __NR_dup2
+#endif
+#endif
+#ifndef SYS_dup3
+#ifdef __NR_dup3
+#define SYS_dup3 __NR_dup3
+#endif
+#endif
+#ifndef SYS_ioctl
+#ifdef __NR_ioctl
+#define SYS_ioctl __NR_ioctl
+#endif
+#endif
 #ifndef FBIO_WAITFORVSYNC
 #define FBIO_WAITFORVSYNC _IOW('F', 0x20, uint32_t)
 #endif
