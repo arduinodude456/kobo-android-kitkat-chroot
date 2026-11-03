@@ -3,7 +3,7 @@ local ffi=require("ffi")
 local function stub(name,value) package.preload[name]=function() return value or {} end end
 stub("ffi/blitbuffer",{})
 stub("device",{screen={}})
-for _,name in ipairs({"ui/font","ui/geometry","ui/gesturerange","ui/widget/infomessage","ui/widget/textwidget","ui/uimanager"}) do stub(name,{}) end
+for _,name in ipairs({"ui/font","ui/geometry","ui/gesturerange","ui/widget/infomessage","ui/widget/textwidget","ui/widget/textviewer","ui/uimanager"}) do stub(name,{}) end
 stub("ui/widget/container/inputcontainer",{extend=function(_,v)return v end})
 stub("socket",{gettime=os.clock})
 local module=dofile("lua/appdock_android.lua")
