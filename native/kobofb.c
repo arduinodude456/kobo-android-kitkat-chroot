@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #define _LARGEFILE64_SOURCE
 #include "kobo_fb.h"
+#include "kobo_binder.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/fb.h>
@@ -177,6 +178,10 @@ static int valid_var(const struct fb_var_screeninfo *v)
         !v->transp.offset && !v->transp.length && !v->transp.msb_right &&
         (activate == FB_ACTIVATE_NOW || activate == FB_ACTIVATE_VBL || activate == FB_ACTIVATE_TEST);
 }
+static long raw_ioctl(int fd, unsigned long request, void *arg)
+{
+    return syscall(SYS_ioctl, fd, request, arg);
+}
 #ifdef __BIONIC__
 int ioctl(int fd, int request, ...)
 #else
@@ -191,6 +196,8 @@ int ioctl(int fd, unsigned long request, ...)
         && request != TIOCEXCL && request != TIOCNXCL
 #endif
     ) { va_start(ap, request); arg = va_arg(ap, void *); va_end(ap); }
+    /* Android 5 userspace speaks the 32 bit binder ABI, the kernel the 64 bit one. */
+    if (kobo_binder_wants((uint32_t)request)) return (int)kobo_binder_ioctl(fd, (unsigned long)request, arg, raw_ioctl);
     if (!fake_fd(fd)) return (int)syscall(SYS_ioctl, fd, request, arg);
     if (initialize() < 0) return -1;
     switch ((unsigned long)request) {

@@ -15,6 +15,7 @@ on init
     export KOBO_FB_FORMAT RGB565
     export KOBO_FB_FILE /dev/kobo/fb.bin
     export KOBO_FB_META /dev/kobo/fb.meta
+    export KOBO_BINDER_LOG /data/local/tmp/kobo-binder.log
     symlink /system/etc /etc
     symlink /system/bin /bin
     symlink /data/local/tmp /tmp

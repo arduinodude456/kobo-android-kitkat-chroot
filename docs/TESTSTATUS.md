@@ -10,6 +10,10 @@ Das offizielle Android-NDK r10e wurde heruntergeladen. Die SHA-256-Prüfsumme is
 
 Vor der Umstellung bestanden 36 Python-Tests und 12 Lua-RFB-Assertions. Diese Tests prüfen Host-Laufzeit, Paketierung und Fixtures; sie beweisen nicht den Android-Boot. Die neu hinzugefügten Workflowtests prüfen, dass der manuelle Job nur die fest gepinnten SDK-/NDK-Downloads und Native-Builds verwendet und keinen `repo sync`, AOSP-Vollbuild oder LVM-Disk-Workaround mehr startet.
 
+## Binder-Shim (2. November 2026)
+
+`native/kobo_binder.c` ist gegen die echte uapi-Header-Datei (beide Konfigurationen, `tests/binder_abi_check_*.c`) und gegen einen simulierten 64-Bit-Binder-Kernel (`tests/binder_shim_test.c`, ARM32 unter qemu-user) geprüft: Transaktionen mit Objekten in beide Richtungen, Reply, Status-Codes, Death-Notifications, Teilverbrauch des Schreibstroms, Fehlerpfade, Speicherfreigabe. Gegen einen echten Binder-Treiber, Bionic-libbinder oder auf dem Gerät wurde er **nicht** ausgeführt. Mögliche weitere Blocker nach dem Binder: SELinux-`load_policy` des Stock-init, SurfaceFlinger/Gralloc, Zygote-Speicherbedarf.
+
 ## Noch offen
 
 Der neue Workflow muss auf GitHub erfolgreich ARM32-Bionic-Helper kompilieren, die Systempartition und Ramdisk übernehmen, ein ext4-Rootfs bilden und das ZIP hochladen. Erst danach wissen wir, ob das Paketierungsformat mit diesem SDK-Image konsistent ist. Eine CI-Erzeugung bestätigt noch nicht, dass Android auf echter Kobo-Firmware startet.

@@ -135,7 +135,7 @@ NATIVE="$BUILD/native-arm"
 mkdir -p "$NATIVE"
 COMMON=(--sysroot="$SYSROOT" -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16 -Os -g0 -std=gnu99 -Wall -Wextra -Wformat=2)
 "$CC" "${COMMON[@]}" -fPIC -shared -pthread \
-    "$ROOT/native/kobofb.c" "$ROOT/native/kobo_fb.c" \
+    "$ROOT/native/kobofb.c" "$ROOT/native/kobo_fb.c" "$ROOT/native/kobo_binder.c" \
     -Wl,-soname,libkobofb.so -o "$NATIVE/libkobofb.so"
 "$CC" "${COMMON[@]}" "$ROOT/native/kobo_vnc.c" "$ROOT/native/kobo_fb.c" \
     "$ROOT/native/kobo_input.c" -static -pthread -lm -o "$NATIVE/kobo-vnc"

@@ -8,6 +8,7 @@ local GestureRange = require("ui/gesturerange")
 local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local TextWidget = require("ui/widget/textwidget")
+local TextViewer = require("ui/widget/textviewer")
 local UIManager = require("ui/uimanager")
 local ffi = require("ffi")
 local socket = require("socket")
@@ -23,11 +24,29 @@ local function tail_file(path, limit)
     local n = f:seek("end") or 0; f:seek("set", math.max(0, n - limit))
     local s = f:read("*a") or ""; f:close(); return s
 end
+local function run_cmd(cmd, limit)
+    local f = io.popen(cmd .. " 2>&1")
+    if not f then return "" end
+    local out = f:read("*a") or ""; f:close()
+    if #out > limit then out = out:sub(-limit) end
+    return out
+end
 local function diagnostics()
+    local kmsg = tail_file(BASE .. "/run/rootfs/dev/kmsg", 2400)
     local log = tail_file(BASE .. "/android.log", 3200)
     local init = tail_file(BASE .. "/android-init.log", 1200)
     if log == "" then log = "Kein android.log vorhanden." end
     if init ~= "" then log = log .. "\n\n--- android-init.log ---\n" .. init end
+    if kmsg ~= "" then log = "--- init/kmsg (live) ---\n" .. kmsg .. "\n\n--- android.log ---\n" .. log end
+    -- Android-init schreibt per klog in den HOST-Kernel-Log (dmesg), nicht in die Datei dev/kmsg.
+    local dm = run_cmd("dmesg | grep -iE 'init:|binder|ashmem|surfaceflinger|zygote|servicemanager|avc' | tail -n 60", 3000)
+    local ps = run_cmd("ps | grep -iE '/init|zygote|surfaceflinger|servicemanager|system_server|kobo-vnc' | grep -v grep", 1500)
+    -- Written by the binder shim inside libkobofb.so (KOBO_BINDER_LOG): proves LD_PRELOAD reached the
+    -- Android processes and lists translation errors.
+    local shim = tail_file(BASE .. "/run/rootfs/data/local/tmp/kobo-binder.log", 1500)
+    log = "--- binder shim ---\n" .. (shim ~= "" and shim or "(leer: Shim wurde in keinem Prozess geladen)") .. "\n\n" .. log
+    log = "--- Prozesse ---\n" .. (ps ~= "" and ps or "(keine Android-Prozesse)") ..
+          "\n\n--- dmesg (init/Android) ---\n" .. (dm ~= "" and dm or "(leer)") .. "\n\n" .. log
     return log
 end
 local function recover_stale_state()
@@ -115,7 +134,7 @@ function RFB:poll()
             local stride=tonumber(self.bb.stride) or self.w*4
             local src=ffi.cast("const uint8_t*",data)
             for row=0,r.h-1 do
-                local dst=self.bb.data+(r.y+row)*stride+r.x*4
+                local dst=ffi.cast("uint8_t*",self.bb.data)+(r.y+row)*stride+r.x*4
                 ffi.copy(dst,src+row*r.w*4,r.w*4)
                 for col=0,r.w-1 do dst[col*4+3]=255 end
             end
@@ -155,7 +174,7 @@ function View:init()
     self.face=Font:getFace("cfont",22)
     self.status=TextWidget:new{text="Android startet. Der erste Boot kann mehrere Minuten dauern.",face=self.face,max_width=self.dimen.w-40}
     self.buttons={}
-    local defs={{"Zurück",0xff1b},{"Home",0xff50},{"Menü",0xffbe},{"Beenden",false}}
+    local defs={{"Zurück",0xff1b},{"Home",0xff50},{"Menü",0xffbe},{"Log","log"},{"Beenden",false}}
     local bw=math.floor(self.dimen.w/#defs)
     for i,d in ipairs(defs) do
         self.buttons[i]={label=TextWidget:new{text=d[1],face=self.face},key=d[2],rect=Geom:new{x=(i-1)*bw,y=self.dimen.h-90,w=bw,h=90}}
@@ -207,6 +226,9 @@ function View:pulse(key)
     end
     self.key_timers=self.key_timers or {}; self.key_timers[cb]=true; UIManager:scheduleIn(0.12,cb)
 end
+function View:showLog()
+    UIManager:show(TextViewer:new{title="Android-Log",text=diagnostics(),width=self.dimen.w,height=self.dimen.h})
+end
 function View:onAndroidBack() self:pulse(0xff1b); return true end
 function View:onAndroidGesture(_,ges)
     if self.closed then return true end
@@ -216,7 +238,8 @@ function View:onAndroidGesture(_,ges)
     if kind=="tap" then
         for _,b in ipairs(self.buttons) do
             if b.rect:contains(pos) then
-                if b.key then self:pulse(b.key) else UIManager:close(self,"full") end
+                if b.key=="log" then self:showLog()
+                elseif b.key then self:pulse(b.key) else UIManager:close(self,"full") end
                 return true
             end
         end

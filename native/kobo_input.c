@@ -198,10 +198,10 @@ int kobo_probe(void)
         } else if (v.protocol_version != 7 && v.protocol_version != 8) {
             fprintf(stderr, "binder: unsupported protocol %d, need Android Binder protocol 7 or 8\n", v.protocol_version); failed = 1;
         } else if (v.protocol_version == 8) {
-            /* The Kobo kernel reports Binder 8 even though this is a 32-bit
-             * API-21 userspace. Let the real framework probe decide whether
-             * the driver/userspace command ABI is usable. */
-            fprintf(stderr, "binder: protocol 8 accepted for API-21 userspace\n");
+            /* 64-bit binder ABI (kernel without CONFIG_ANDROID_BINDER_IPC_32BIT).
+             * Android 5 speaks the 32-bit ABI; libkobofb.so (kobo_binder.c)
+             * translates BINDER_VERSION and BINDER_WRITE_READ in every process. */
+            fprintf(stderr, "binder: protocol 8 (64-bit ABI), translated by libkobofb.so\n");
         } else fprintf(stderr, "binder: protocol 7 OK\n");
         close(fd);
     }

@@ -107,6 +107,44 @@ watchdog() {
         sleep 1
     done
 }
+unmount_tree() {
+    # Android-init (stock) stapelt eigene Mounts (tmpfs auf /dev, proc, sysfs, devpts) auf unsere.
+    # Deshalb von oben nach unten und mehrfach aushaengen, bis nichts mehr unter dem Rootfs haengt.
+    pass=0
+    while [ "$pass" -lt 12 ]; do
+        list=$(awk -v r="$ROOTFS" -v s="$RUN/shared" '$2 == r || index($2, r "/") == 1 || $2 == s { print $2 }' /proc/mounts | sort -r)
+        [ -n "$list" ] || return 0
+        for m in $list; do umount "$m" 2>/dev/null || true; done
+        pass=$((pass + 1))
+    done
+    echo "Android: Mounts bleiben belegt:" >&2
+    awk -v r="$ROOTFS" 'index($2, r) == 1 { print "  " $2 }' /proc/mounts >&2
+    return 1
+}
+patch_init_rc() {
+    # Das stock-init der Emulator-Ramdisk mountet ein frisches tmpfs auf /dev und versteckt damit
+    # alle vom Host vorbereiteten Geraete (binder, ashmem, null, input, kobo). Ohne ueventd gibt es
+    # keinen Weg zurueck. Loesung: Knoten liegen zusaetzlich unter /hostdev und werden in /dev verlinkt.
+    rc="$ROOTFS/init.rc"
+    [ -f "$rc" ] || return 0
+    grep -q 'KOBO_HOSTDEV_V1' "$rc" && return 0
+    links="null zero random urandom tty binder ashmem input kobo"
+    [ ! -d /dev/log ] || links="$links log"
+    tmp="$RUN/init.rc.new"
+    awk -v links="$links" '
+        $1 == "mkdir" && ($2 == "/dev/kobo" || $2 == "/dev/input") { next }
+        { print }
+        $1 == "on" && $2 == "early-init" && NF == 2 && !done {
+            print "    # KOBO_HOSTDEV_V1: stock init mounts a fresh tmpfs over /dev; re-expose host-prepared nodes."
+            print "    write /dev/.coldboot_done 1"
+            n = split(links, a, " ")
+            for (i = 1; i <= n; i++) print "    symlink /hostdev/" a[i] " /dev/" a[i]
+            done = 1
+        }' "$rc" > "$tmp" || { rm -f "$tmp"; fail 'init.rc konnte nicht angepasst werden.'; }
+    grep -q 'KOBO_HOSTDEV_V1' "$tmp" || { rm -f "$tmp"; fail 'init.rc: "on early-init" nicht gefunden.'; }
+    cat "$tmp" > "$rc" && rm -f "$tmp"
+    echo "init.rc angepasst (KOBO_HOSTDEV_V1)"
+}
 cleanup() {
     trap - EXIT INT TERM HUP
     if [ -n "${container_pid:-}" ]; then
@@ -124,11 +162,7 @@ cleanup() {
     fi
     sync
     unmount_failed=0
-    for p in "$ROOTFS/dev/kobo" "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS" "$RUN/shared"; do
-        if mounted "$p"; then
-            umount "$p" || { echo "Android: Mount bleibt belegt: $p" >&2; unmount_failed=1; }
-        fi
-    done
+    unmount_tree || unmount_failed=1
     rm -f "$RUN/runner.pid" "$RUN/container.pid" "$RUN/vnc.pid" "$RUN/ready"
     if [ "$unmount_failed" = 0 ]; then rmdir "$RUN/lock" 2>/dev/null || true; fi
 }
@@ -145,6 +179,8 @@ run() {
     mounted "$ROOTFS" && fail 'Rootfs ist bereits gemountet.'
     mount -t ext4 -o loop,noatime,nosuid "$BASE/rootfs.img" "$ROOTFS"
     [ -f "$ROOTFS/kobo-chroot" ] || fail 'Falsches Rootfs: Sicherheitsmarker fehlt.'
+    patch_init_rc
+    rm -f "$ROOTFS/data/local/tmp/kobo-binder.log" 2>/dev/null || true   # fresh shim log per boot
     # Replace image-provided dangling proc/sys symlinks with mountpoint dirs.
     # The official image may inherit these links from its emulator product.
     [ ! -L "$ROOTFS/proc" ] || rm -f "$ROOTFS/proc"
@@ -193,6 +229,14 @@ run() {
     chmod 0660 "$RUN/shared/fb.bin" "$RUN/shared/fb.meta"
     chmod 0660 "$ROOTFS/dev/input"/event*
     chown 1000:1004 "$ROOTFS/dev/input"/event*
+    # Zweiter Zugang zu den Geraeteknoten, der nicht von init's tmpfs auf /dev verdeckt wird.
+    mkdir -p "$ROOTFS/hostdev"
+    if ! mount -o rbind "$ROOTFS/dev" "$ROOTFS/hostdev" 2>/dev/null; then
+        mount -o bind "$ROOTFS/dev" "$ROOTFS/hostdev" || fail 'hostdev-Bind fehlgeschlagen.'
+        mount -o bind "$RUN/shared" "$ROOTFS/hostdev/kobo" || fail 'hostdev/kobo-Bind fehlgeschlagen.'
+    fi
+    [ -c "$ROOTFS/hostdev/binder" ] && [ -d "$ROOTFS/hostdev/kobo" ] || fail 'hostdev unvollstaendig.'
+    echo "hostdev bereit: $(ls "$ROOTFS/hostdev" | tr '\n' ' ')"
     if [ "$proc_ready" = 1 ]; then
         echo "Start per Shell-chroot (kobo-container umgangen)"
         # env -i replaces PATH, so resolve host binaries to absolute paths first.
@@ -256,9 +300,7 @@ case "${1:-status}" in
         running && fail 'Android läuft noch. Erst stop verwenden.'
         orphan_active && fail 'Verwaiste Android-Prozesse noch aktiv. Keine Mounts entfernt; Kobo sauber neu starten.'
         # Never kill arbitrary PIDs or lazy-unmount potentially active filesystems.
-        for p in "$ROOTFS/dev/kobo" "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS" "$RUN/shared"; do
-            if mounted "$p"; then umount "$p" || fail "Mount belegt: $p. Gerät sauber neu starten."; fi
-        done
+        unmount_tree || fail 'Mounts belegt. Gerät sauber neu starten.'
         rm -f "$RUN/runner.pid" "$RUN/container.pid" "$RUN/vnc.pid" "$RUN/ready"
         rmdir "$RUN/lock" 2>/dev/null || true
         echo 'Laufzeitzustand bereinigt.'

@@ -4,7 +4,7 @@ LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 LOCAL_MODULE := libkobofb
 LOCAL_MODULE_TAGS := optional
-LOCAL_SRC_FILES := kobofb.c kobo_fb.c
+LOCAL_SRC_FILES := kobofb.c kobo_fb.c kobo_binder.c
 LOCAL_CFLAGS := -std=gnu99 -Os -Wall -Wextra
 LOCAL_SHARED_LIBRARIES := libc
 include $(BUILD_SHARED_LIBRARY)
