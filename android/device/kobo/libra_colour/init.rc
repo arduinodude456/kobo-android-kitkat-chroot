@@ -16,6 +16,8 @@ on init
     export KOBO_FB_FILE /dev/kobo/fb.bin
     export KOBO_FB_META /dev/kobo/fb.meta
     export KOBO_BINDER_LOG /data/local/tmp/kobo-binder.log
+    # liblog-Ersatz in libkobofb.so (kein /dev/log, kein logd in Android 5.0.2)
+    export KOBO_LOG_FILE /data/local/tmp/android.log
     # zygote crasht beim Preload mit NullPointerException (android.os.Debug / Environment), wenn
     # EXTERNAL_STORAGE fehlt: new File(System.getenv("EXTERNAL_STORAGE")). Das Emulator-init.goldfish.rc,
     # das die Variablen sonst setzt, wird hier nicht benutzt -> selbst exportieren.
@@ -81,13 +83,6 @@ on post-fs-data
 on boot
     class_start core
     class_start main
-
-# Logging: ohne logd gibt es kein logcat und damit keine Absturzursache.
-service logd /system/bin/logd
-    class core
-    socket logd stream 0666 logd logd
-    socket logdr seqpacket 0666 logd logd
-    socket logdw dgram 0222 logd logd
 
 # Tombstones (/data/tombstones) mit Backtrace, falls surfaceflinger/zygote per Signal sterben.
 service debuggerd /system/bin/debuggerd

@@ -220,7 +220,7 @@ bootwatch() {
         for d in /proc/[0-9]*; do [ "$(readlink "$d/root" 2>/dev/null)" = "$ROOTFS" ] && n=$((n + 1)); done
         echo "$(date +%T) t=${i}0s procs=$n boot=$(gp sys.boot_completed) sm=$(gp init.svc.servicemanager) sf=$(gp init.svc.surfaceflinger) zygote=$(gp init.svc.zygote) netd=$(gp init.svc.netd) frei_kb=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)" >> "$w"
         # Absturzursache sichtbar machen: logcat (Fehler/Fatal) und neuester Tombstone
-        chroot "$ROOTFS" /system/bin/logcat -d -v time -t 200 > "$BASE/logcat.txt" 2>&1
+        tail -n 120 "$ROOTFS/data/local/tmp/android.log" > "$BASE/logcat.txt" 2>&1
         t=$(ls -t "$ROOTFS"/data/tombstones 2>/dev/null | head -n 1)
         if [ -n "$t" ]; then head -n 60 "$ROOTFS/data/tombstones/$t" > "$BASE/tombstone.txt" 2>/dev/null; fi
         [ "$(gp sys.boot_completed)" = 1 ] && { echo "BOOT FERTIG nach ${i}0s" >> "$w"; break; }
@@ -269,6 +269,7 @@ run() {
     chmod 0777 "$ROOTFS/data/local/tmp"
     # Shim-Log vorab anlegen und fuer alle uids beschreibbar machen (SurfaceFlinger laeuft als system)
     : > "$ROOTFS/data/local/tmp/kobo-binder.log"; chmod 0666 "$ROOTFS/data/local/tmp/kobo-binder.log"
+    : > "$ROOTFS/data/local/tmp/android.log"; chmod 0666 "$ROOTFS/data/local/tmp/android.log"
     rm -rf "$ROOTFS/data/tombstones" 2>/dev/null || true; rm -f "$BASE/logcat.txt" "$BASE/tombstone.txt"
     # Replace image-provided dangling proc/sys symlinks with mountpoint dirs.
     # The official image may inherit these links from its emulator product.
