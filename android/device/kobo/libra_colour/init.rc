@@ -73,6 +73,8 @@ on init
     # Nicht uebernommen (wuerden den Kobo-Host veraendern): ueventd, vold, mount-Aktionen (cgroups, tmpfs),
     # write/chown auf /proc, /sys, /proc/sys, hostname/domainname/ifup, powerctl, setcon, console, adbd.
     sysclktz 0
+    # init meldet damit auch Exit-Codes/Signale beendeter Dienste (healthd) in dmesg
+    loglevel 6
     symlink /system/vendor /vendor
     mkdir /acct 0755 root root
     mkdir /config 0500 root root

@@ -240,7 +240,7 @@ bootwatch() {
             echo "--- service check batteryproperties:"
             "$ENVB" -i PATH=/system/bin LD_PRELOAD=/system/lib/libkobofb.so "$CHROOTB" "$ROOTFS" /system/bin/service check batteryproperties 2>&1
             echo "--- dmesg healthd/init:"
-            dmesg 2>/dev/null | grep -iE 'healthd|init: (cannot|could not|untracked|service)|init:.*(healthd|exited|killing)' | tail -n 30
+            dmesg 2>/dev/null | grep -iE 'healthd|init: ' | grep -v alarmtimer | head -n 40
         } > "$BASE/healthd.txt" 2>&1
         tail -n 4000 "$ROOTFS/data/local/tmp/android.log" > "$BASE/android-full.log" 2>&1
         t=$(ls -t "$ROOTFS"/data/tombstones 2>/dev/null | head -n 1)
