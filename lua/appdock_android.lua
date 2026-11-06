@@ -49,7 +49,9 @@ local function diagnostics()
     local lc = tail_file(BASE .. "/logcat.txt", 2500)
     local tb = tail_file(BASE .. "/tombstone.txt", 1500)
     if tb ~= "" then log = "--- tombstone ---\n" .. tb .. "\n\n" .. log end
-    if lc ~= "" then log = "--- logcat ---\n" .. lc .. "\n\n" .. log end
+    log = "--- logcat ---\n" .. (lc ~= "" and lc or "(leer: android.log ohne Eintraege)") .. "\n\n" .. log
+    local egl = tail_file(BASE .. "/egl.txt", 2000)
+    if egl ~= "" then log = "--- egl ---\n" .. egl .. "\n\n" .. log end
     log = "--- binder shim ---\n" .. (shim ~= "" and shim or "(leer: Shim wurde in keinem Prozess geladen)") .. "\n\n" .. log
     log = "--- Prozesse ---\n" .. (ps ~= "" and ps or "(keine Android-Prozesse)") ..
           "\n\n--- dmesg (init/Android) ---\n" .. (dm ~= "" and dm or "(leer)") .. "\n\n" .. log

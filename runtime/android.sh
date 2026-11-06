@@ -215,6 +215,14 @@ bootwatch() {
     set +e
     w="$BASE/bootwatch.log"; : > "$w"; i=0
     gp() { chroot "$ROOTFS" /system/bin/getprop "$1" 2>/dev/null | tr -d '\r'; }
+    {
+        echo "libkobofb hat Log-Ersatz (neues Build): $(grep -c __android_log_write "$ROOTFS/system/lib/libkobofb.so" 2>&1)"
+        echo "--- egl.cfg:"; cat "$ROOTFS/system/lib/egl/egl.cfg" 2>&1
+        echo "--- ls -l system/lib/egl:"; ls -l "$ROOTFS/system/lib/egl" 2>&1
+        echo "--- ls system/lib/hw:"; ls "$ROOTFS/system/lib/hw" 2>&1 | tr '\n' ' '; echo
+        echo "--- libEGL/libGLES*:"; ls -l "$ROOTFS"/system/lib/libEGL.so "$ROOTFS"/system/lib/libGLES* 2>&1
+        echo "--- Props:"; grep -E 'ro.hardware|egl|opengl|qemu' "$ROOTFS/system/build.prop" "$ROOTFS/default.prop" 2>&1
+    } > "$BASE/egl.txt" 2>&1
     while [ "$i" -lt 60 ] && kill -0 "$container_pid" 2>/dev/null; do
         sleep 10; i=$((i + 1)); n=0
         for d in /proc/[0-9]*; do [ "$(readlink "$d/root" 2>/dev/null)" = "$ROOTFS" ] && n=$((n + 1)); done
