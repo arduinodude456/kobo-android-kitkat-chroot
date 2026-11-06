@@ -16,6 +16,12 @@ on init
     export KOBO_FB_FILE /dev/kobo/fb.bin
     export KOBO_FB_META /dev/kobo/fb.meta
     export KOBO_BINDER_LOG /data/local/tmp/kobo-binder.log
+    # zygote crasht beim Preload mit NullPointerException (android.os.Debug / Environment), wenn
+    # EXTERNAL_STORAGE fehlt: new File(System.getenv("EXTERNAL_STORAGE")). Das Emulator-init.goldfish.rc,
+    # das die Variablen sonst setzt, wird hier nicht benutzt -> selbst exportieren.
+    # Folge: zygote stirbt, SF-"onrestart restart zygote" und der Neustart-Kreislauf beginnen.
+    export EXTERNAL_STORAGE /storage/emulated/legacy
+    export SECONDARY_STORAGE /storage/sdcard1
     symlink /system/etc /etc
     symlink /system/bin /bin
     symlink /data/local/tmp /tmp
@@ -46,6 +52,12 @@ on init
     mkdir /data/property 0700 root root
     mkdir /data/local 0751 root root
     mkdir /data/local/tmp 0771 shell shell
+    # Prozesse mit uid system/media/... (SurfaceFlinger, Shim-Log) muessen hier schreiben koennen.
+    chmod 0777 /data/local/tmp
+    mkdir /data/tombstones 0771 system system
+    mkdir /data/dalvik-cache/profiles 0711 system system
+    mkdir /storage/sdcard1 0775 root root
+    mkdir /storage/emulated/legacy 0775 root root
     mkdir /data/drm 0770 drm drm
     mkdir /data/mediadrm 0770 mediadrm mediadrm
     mkdir /data/security 0711 system system
@@ -69,6 +81,17 @@ on post-fs-data
 on boot
     class_start core
     class_start main
+
+# Logging: ohne logd gibt es kein logcat und damit keine Absturzursache.
+service logd /system/bin/logd
+    class core
+    socket logd stream 0666 logd logd
+    socket logdr seqpacket 0666 logd logd
+    socket logdw dgram 0222 logd logd
+
+# Tombstones (/data/tombstones) mit Backtrace, falls surfaceflinger/zygote per Signal sterben.
+service debuggerd /system/bin/debuggerd
+    class main
 
 service servicemanager /system/bin/servicemanager
     class core

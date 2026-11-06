@@ -46,6 +46,10 @@ local function diagnostics()
     local shim = tail_file(BASE .. "/run/rootfs/data/local/tmp/kobo-binder.log", 1500)
     local watch = tail_file(BASE .. "/bootwatch.log", 1500)
     if watch ~= "" then log = "--- Boot-Zeitachse ---\n" .. watch .. "\n\n" .. log end
+    local lc = tail_file(BASE .. "/logcat.txt", 2500)
+    local tb = tail_file(BASE .. "/tombstone.txt", 1500)
+    if tb ~= "" then log = "--- tombstone ---\n" .. tb .. "\n\n" .. log end
+    if lc ~= "" then log = "--- logcat ---\n" .. lc .. "\n\n" .. log end
     log = "--- binder shim ---\n" .. (shim ~= "" and shim or "(leer: Shim wurde in keinem Prozess geladen)") .. "\n\n" .. log
     log = "--- Prozesse ---\n" .. (ps ~= "" and ps or "(keine Android-Prozesse)") ..
           "\n\n--- dmesg (init/Android) ---\n" .. (dm ~= "" and dm or "(leer)") .. "\n\n" .. log
