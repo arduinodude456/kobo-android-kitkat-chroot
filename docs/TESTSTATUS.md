@@ -8,6 +8,10 @@ Die bereitgestellten Logs enthalten den Rootfs-Marker `android-5.0.2_api21`; sie
 - `logcat` enthält wiederholt `logwrapper: Cannot create parent ptty`. Die angepasste Init hatte `/dev/pts` erzeugt, aber nicht `devpts` gemountet. Netd-/iptables-Aufrufe scheiterten ebenfalls.
 - `stages.log` zeigt zusätzlich einen Segfault beim direkten `/system/bin/sh`-Probe. Der spätere normale Start lief aber deutlich weiter bis Zygote und SystemServer; der Probe-Fehler darf daher nicht mit dem dokumentierten Framework-Bootfehler gleichgesetzt werden.
 
+## Ursache der Bootschleife (Nachtrag)
+
+`/sbin/healthd` ist in KitKat **statisch** gelinkt. `LD_PRELOAD=libkobofb.so` (Binder-32→64-Bit-Übersetzung) wirkt auf statische Programme nicht. Der Kobo-Kernel 4.9.77 spricht Binder-Protokoll 8 (64 Bit); healthd scheitert bei `BINDER_VERSION` und beendet sich, `batteryproperties` wird nie registriert, `BatteryService.<init>` wirft die NPE, system_server stirbt, zygote startet endlos neu. Die QEMU-Variante hat einen Kernel mit `CONFIG_ANDROID_BINDER_IPC_32BIT` und braucht keine Übersetzung. Die Reihenfolge-/Trigger-Änderungen unten beseitigen diese Ursache nicht. Fix: `native/kobo_healthd.c` (dynamisch, bionic) ersetzt `/sbin/healthd`, registriert `batteryproperties` und meldet einen festen Akkustand. Auf Gerät noch nicht verifiziert (Log: `/data/local/tmp/kobo-healthd.log`).
+
 ## Umgesetzte Änderungen
 
 1. Der erste veröffentlichte Fix schob `healthd` hinter `servicemanager`; das wich von QEMUs erfolgreicher Reihenfolge ab. Der aktuelle Init startet `healthd` wieder als `core`-Dienst vor `servicemanager`.

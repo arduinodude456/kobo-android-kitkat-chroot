@@ -73,8 +73,6 @@ on init
     # Nicht uebernommen (wuerden den Kobo-Host veraendern): ueventd, vold, mount-Aktionen (cgroups, tmpfs),
     # write/chown auf /proc, /sys, /proc/sys, hostname/domainname/ifup, powerctl, setcon, console, adbd.
     sysclktz 0
-    # init meldet damit auch Exit-Codes/Signale beendeter Dienste (healthd) in dmesg
-    loglevel 6
     symlink /system/vendor /vendor
     mkdir /acct 0755 root root
     mkdir /config 0500 root root
@@ -154,7 +152,9 @@ service debuggerd /system/bin/debuggerd
     class main
 
 # QEMU's stock KitKat init starts healthd in core before servicemanager.
-# Keep this ordering: system_server must see batteryproperties during startup.
+# /sbin/healthd is replaced at build time by the DYNAMIC kobo-healthd (native/kobo_healthd.c):
+# the stock binary is static, so the LD_PRELOAD binder 32->64 bit shim does not apply to it,
+# it never registers "batteryproperties" and system_server dies in BatteryService (boot loop).
 service healthd /sbin/healthd
     class core
 

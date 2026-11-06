@@ -240,7 +240,7 @@ bootwatch() {
             echo "--- service check batteryproperties:"
             "$ENVB" -i PATH=/system/bin LD_PRELOAD=/system/lib/libkobofb.so "$CHROOTB" "$ROOTFS" /system/bin/service check batteryproperties 2>&1
             echo "--- dmesg healthd/init:"
-            dmesg 2>/dev/null | grep -iE 'healthd|init: ' | grep -v alarmtimer | head -n 40
+            dmesg 2>/dev/null | grep -iE 'healthd|init: (cannot|could not|untracked|service)|init:.*(healthd|exited|killing)' | tail -n 30
         } > "$BASE/healthd.txt" 2>&1
         tail -n 4000 "$ROOTFS/data/local/tmp/android.log" > "$BASE/android-full.log" 2>&1
         t=$(ls -t "$ROOTFS"/data/tombstones 2>/dev/null | head -n 1)
@@ -287,6 +287,8 @@ run() {
     mount -t ext4 -o loop,noatime,nosuid "$BASE/rootfs.img" "$ROOTFS"
     [ -f "$ROOTFS/kobo-chroot" ] && [ "$(cat "$ROOTFS/kobo-chroot")" = 'android-kitkat_api19' ] || fail 'Falsches Rootfs: KitKat/API-19-Image erforderlich. Altes rootfs.img sichern, entfernen und neu installieren.'
     patch_init_rc
+    # Statisches /sbin/healthd ignoriert LD_PRELOAD (Binder-Shim) -> batteryproperties fehlt -> Boot-Schleife.
+    grep -aq '/system/bin/linker' "$ROOTFS/sbin/healthd" 2>/dev/null || fail 'Rootfs veraltet: /sbin/healthd ist statisch (kein kobo-healthd). Neues Paket installieren.'
     mkdir -p "$ROOTFS/data/local/tmp"
     chmod 0777 "$ROOTFS/data/local/tmp"
     # Shim-Log vorab anlegen und fuer alle uids beschreibbar machen (SurfaceFlinger laeuft als system)

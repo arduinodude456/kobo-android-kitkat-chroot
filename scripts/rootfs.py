@@ -8,7 +8,7 @@ import stat
 import struct
 import subprocess
 
-REQUIRED = ('init', 'init.rc', 'init.environ.rc', 'default.prop',
+REQUIRED = ('init', 'init.rc', 'sbin/healthd', 'init.environ.rc', 'default.prop',
     'system/build.prop', 'system/bin/app_process', 'system/bin/servicemanager',
     'system/bin/surfaceflinger', 'system/bin/installd',
     'system/lib/libkobofb.so', 'system/lib/hw/gralloc.default.so',
@@ -29,6 +29,14 @@ def arm_elf(path, static=False):
                 raise ValueError('host helper must be static, without PT_DYNAMIC or PT_INTERP: ' + str(path))
 
 
+def has_interp(path):
+    """True if the ELF32 file has a PT_INTERP header (dynamic executable)."""
+    data = path.read_bytes()
+    offset = struct.unpack_from('<I', data, 28)[0]
+    size, count = struct.unpack_from('<HH', data, 42)
+    return any(struct.unpack_from('<I', data, offset + size * i)[0] == 3 for i in range(count))
+
+
 def validate(stage):
     for name in REQUIRED:
         if not (stage / name).is_file():
@@ -39,6 +47,9 @@ def validate(stage):
         arm_elf(stage / name)
     for name in ('kobo-vnc', 'kobo-container'):
         arm_elf(stage / 'system/bin' / name, static=True)
+    arm_elf(stage / 'sbin/healthd')
+    if not has_interp(stage / 'sbin/healthd'):
+        raise ValueError('sbin/healthd is static: the binder LD_PRELOAD shim cannot apply; use kobo-healthd')
     initrc = (stage / 'init.rc').read_text()
     if 'service zygote ' not in initrc or 'service surfaceflinger ' not in initrc:
         raise ValueError('dedicated init.rc missing framework services')

@@ -119,6 +119,16 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('ee5f405f3b57c4f5c3b3b8b5d495ae12b660e03d2112e4ed5c728d349f1e520c', script)
         self.assertIn('sha256sum --check', script)
 
+    def test_static_healthd_is_replaced_by_dynamic_helper(self):
+        build = (ROOT / 'scripts/00-prebuilt-sdk.sh').read_text()
+        self.assertIn('native/kobo_healthd.c', build)
+        self.assertIn('root/sbin/healthd', build)
+        self.assertNotIn('-static', build.split('kobo_healthd.c', 1)[1].split('\n', 1)[0])
+        rootfs = (ROOT / 'scripts/rootfs.py').read_text()
+        self.assertIn("'sbin/healthd'", rootfs)
+        self.assertIn('has_interp', rootfs)
+        self.assertIn('kobo_healthd', (ROOT / 'android/device/kobo/libra_colour/init.rc').read_text())
+
     def test_kitkat_init_replays_qemu_boot_triggers(self):
         initrc = (ROOT / 'android/device/kobo/libra_colour/init.rc').read_text()
         self.assertIn('mount devpts devpts /dev/pts', initrc)
