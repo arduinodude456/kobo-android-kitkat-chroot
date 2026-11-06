@@ -44,6 +44,8 @@ local function diagnostics()
     -- Written by the binder shim inside libkobofb.so (KOBO_BINDER_LOG): proves LD_PRELOAD reached the
     -- Android processes and lists translation errors.
     local shim = tail_file(BASE .. "/run/rootfs/data/local/tmp/kobo-binder.log", 1500)
+    local watch = tail_file(BASE .. "/bootwatch.log", 1500)
+    if watch ~= "" then log = "--- Boot-Zeitachse ---\n" .. watch .. "\n\n" .. log end
     log = "--- binder shim ---\n" .. (shim ~= "" and shim or "(leer: Shim wurde in keinem Prozess geladen)") .. "\n\n" .. log
     log = "--- Prozesse ---\n" .. (ps ~= "" and ps or "(keine Android-Prozesse)") ..
           "\n\n--- dmesg (init/Android) ---\n" .. (dm ~= "" and dm or "(leer)") .. "\n\n" .. log

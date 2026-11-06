@@ -145,6 +145,83 @@ patch_init_rc() {
     cat "$tmp" > "$rc" && rm -f "$tmp"
     echo "init.rc angepasst (KOBO_HOSTDEV_V1)"
 }
+# ---- Diagnose: Stufentest (sh android.sh stages) -> stages.log -------------------------------------
+# Prueft einzeln, WO der Chroot scheitert. Startet kein init, kein zygote; alles wird danach wieder abgebaut.
+stages_body() {
+    set +e
+    ok() { echo "ERGEBNIS $1: OK"; }
+    bad() { echo "ERGEBNIS $1: FEHLER ($2)"; }
+    echo "=== STUFE 0: Umgebung"
+    echo "uid=$(id -u) kernel=$(uname -r) $(uname -m)"
+    grep -E 'MemTotal|MemAvailable' /proc/meminfo
+    ls -l "$BASE/rootfs.img" "$BASE/rootfs.img.gz" 2>&1
+    if [ ! -f "$BASE/rootfs.img" ]; then
+        echo "rootfs.img fehlt, entpacke ..."
+        sh "$BASE/install.sh" 2>&1 || { bad 0 "install.sh"; return 1; }
+    fi
+    ok 0
+    echo "=== STUFE 1: Kernel-Vorpruefung"
+    if ( check ) 2>&1; then ok 1; else bad 1 "check"; return 1; fi
+    echo "=== STUFE 2: ext4-Image per Loop einbinden"
+    mkdir -p "$ROOTFS"
+    out=$(mount -t ext4 -o loop,noatime,nosuid "$BASE/rootfs.img" "$ROOTFS" 2>&1) || { bad 2 "$out"; return 1; }
+    [ -f "$ROOTFS/kobo-chroot" ] || { bad 2 "Sicherheitsmarker kobo-chroot fehlt"; return 1; }
+    echo "Rootfs-Marker: $(cat "$ROOTFS/kobo-chroot")  Dateien in /system/bin: $(ls "$ROOTFS/system/bin" | wc -l)"
+    ok 2
+    echo "=== STUFE 3: Android-Shell im Chroot (ARM-Linker, bionic)"
+    [ ! -L "$ROOTFS/proc" ] || rm -f "$ROOTFS/proc"
+    [ ! -L "$ROOTFS/sys" ] || rm -f "$ROOTFS/sys"
+    mkdir -p "$ROOTFS/proc" "$ROOTFS/sys" "$ROOTFS/data/local/tmp"
+    prepare_proc >/dev/null 2>&1 || echo "WARNUNG: proc nicht gemountet"
+    mount -t tmpfs -o size=8m,mode=0755,nosuid tmpfs "$ROOTFS/dev" 2>&1
+    for node in null zero random urandom tty; do copy_node "/dev/$node" "$ROOTFS/dev/$node" 0666; done
+    copy_node "$KOBO_BINDER_DEVICE" "$ROOTFS/dev/binder" 0666
+    copy_node "$KOBO_ASHMEM_DEVICE" "$ROOTFS/dev/ashmem" 0666
+    CHROOT_BIN=$(command -v chroot) || { bad 3 "chroot fehlt"; return 1; }
+    out=$("$CHROOT_BIN" "$ROOTFS" /system/bin/sh -c 'echo SH_OK; ls /system' 2>&1)
+    echo "$out"
+    case "$out" in *SH_OK*) ok 3 ;; *) bad 3 "Android-sh startet nicht"; return 1 ;; esac
+    echo "=== STUFE 4: Binder-ABI Ende-zu-Ende (servicemanager + 'service list' mit Shim)"
+    rm -f "$ROOTFS/data/local/tmp/kobo-binder.log"
+    PRE='export LD_PRELOAD=/system/lib/libkobofb.so KOBO_BINDER_LOG=/data/local/tmp/kobo-binder.log'
+    "$CHROOT_BIN" "$ROOTFS" /system/bin/sh -c "$PRE; exec /system/bin/servicemanager" > "$RUN/sm.out" 2>&1 &
+    smpid=$!
+    sleep 3
+    if kill -0 "$smpid" 2>/dev/null; then echo "servicemanager laeuft (PID $smpid)"; else echo "servicemanager ist sofort beendet:"; cat "$RUN/sm.out"; fi
+    out=$("$CHROOT_BIN" "$ROOTFS" /system/bin/sh -c "$PRE; /system/bin/service list" 2>&1)
+    echo "service list: $out"
+    kill "$smpid" 2>/dev/null; sleep 1; kill -KILL "$smpid" 2>/dev/null
+    echo "--- servicemanager-Ausgabe:"; cat "$RUN/sm.out" 2>/dev/null
+    echo "--- Binder-Shim-Log:"; cat "$ROOTFS/data/local/tmp/kobo-binder.log" 2>&1 | tail -n 30
+    case "$out" in *"Found"*) ok 4 ;; *) bad 4 "Binder-Kommunikation funktioniert nicht" ;; esac
+    echo "=== STUFE 5: Kernel-Meldungen (Binder/Ashmem)"
+    dmesg 2>/dev/null | grep -iE 'binder|ashmem|selinux' | tail -n 15
+    echo "=== ENDE"
+}
+stages() {
+    root_required
+    running && fail 'Android laeuft; erst stop.'
+    mkdir "$RUN/lock" 2>/dev/null || fail 'Verwaister Zustand. Erst sh android.sh recover ausfuehren.'
+    ( stages_body ) > "$BASE/stages.log" 2>&1 || true
+    pkill -f "$ROOTFS" 2>/dev/null || true
+    kill_rootfs_procs
+    unmount_tree >> "$BASE/stages.log" 2>&1 || echo "WARNUNG: Mounts blieben belegt" >> "$BASE/stages.log"
+    rm -f "$RUN/sm.out"
+    mounted "$ROOTFS" || rmdir "$RUN/lock" 2>/dev/null || true
+    echo "Stufentest fertig: $BASE/stages.log"
+}
+# ---- Diagnose: Boot-Zeitachse (laeuft waehrend run im Hintergrund) -> bootwatch.log ---------------
+bootwatch() {
+    set +e
+    w="$BASE/bootwatch.log"; : > "$w"; i=0
+    gp() { chroot "$ROOTFS" /system/bin/getprop "$1" 2>/dev/null | tr -d '\r'; }
+    while [ "$i" -lt 60 ] && kill -0 "$container_pid" 2>/dev/null; do
+        sleep 10; i=$((i + 1)); n=0
+        for d in /proc/[0-9]*; do [ "$(readlink "$d/root" 2>/dev/null)" = "$ROOTFS" ] && n=$((n + 1)); done
+        echo "$(date +%T) t=${i}0s procs=$n boot=$(gp sys.boot_completed) sm=$(gp init.svc.servicemanager) sf=$(gp init.svc.surfaceflinger) zygote=$(gp init.svc.zygote) netd=$(gp init.svc.netd) frei_kb=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)" >> "$w"
+        [ "$(gp sys.boot_completed)" = 1 ] && { echo "BOOT FERTIG nach ${i}0s" >> "$w"; break; }
+    done
+}
 cleanup() {
     trap - EXIT INT TERM HUP
     if [ -n "${container_pid:-}" ]; then
@@ -152,6 +229,10 @@ cleanup() {
         wait "$container_pid" 2>/dev/null || true
     fi
     if [ -n "${watchdog_pid:-}" ]; then kill "$watchdog_pid" 2>/dev/null || true; fi
+    if [ -n "${watch_pid:-}" ]; then kill "$watch_pid" 2>/dev/null || true; fi
+    if [ -f "$BASE/android-init.log" ] || [ -n "${container_pid:-}" ]; then
+        dmesg 2>/dev/null | grep -E 'init:|<init>|servicemanager|zygote|surfaceflinger|binder' | tail -n 200 >> "$BASE/android-init.log" 2>/dev/null || true
+    fi
     if [ -n "${vnc_pid:-}" ]; then
         kill -TERM "$vnc_pid" 2>/dev/null || true
         wait "$vnc_pid" 2>/dev/null || true
@@ -169,7 +250,7 @@ cleanup() {
 run() {
     root_required
     mkdir "$RUN/lock" 2>/dev/null || fail 'Schon gestartet oder alte Mounts vorhanden; status/recover prüfen.'
-    container_pid='' vnc_pid='' watchdog_pid=''
+    container_pid='' vnc_pid='' watchdog_pid='' watch_pid=''
     trap cleanup EXIT
     trap 'exit 0' INT TERM HUP
     echo $$ > "$RUN/runner.pid"
@@ -253,6 +334,7 @@ run() {
     container_pid=$!
     echo "$container_pid" > "$RUN/container.pid"
     watchdog & watchdog_pid=$!
+    bootwatch & watch_pid=$!
     touch "$RUN/ready"
     while kill -0 "$container_pid" 2>/dev/null && kill -0 "$vnc_pid" 2>/dev/null; do sleep 1; done
     echo 'Android oder die VNC-Brücke wurde beendet.'
@@ -268,6 +350,7 @@ case "${1:-status}" in
         echo 'Android startet; Details: android.log'
         ;;
     run) run ;;
+    stages) stages ;;
     probe) KOBO_PROBE=1; export KOBO_PROBE; run ;;
     stop)
         root_required
@@ -305,5 +388,5 @@ case "${1:-status}" in
         rmdir "$RUN/lock" 2>/dev/null || true
         echo 'Laufzeitzustand bereinigt.'
         ;;
-    *) echo 'Aufruf: sh android.sh {check|start|stop|status|exec BEFEHL...|recover}' >&2; exit 2 ;;
+    *) echo 'Aufruf: sh android.sh {check|stages|start|stop|status|exec BEFEHL...|recover}' >&2; exit 2 ;;
 esac
