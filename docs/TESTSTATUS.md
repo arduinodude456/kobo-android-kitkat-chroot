@@ -1,23 +1,23 @@
-# Prüfstand des experimentellen Prebuilt-Builds
+# KitKat-API-19-Chroot: Prüfstand
 
-Stand: 2. November 2026. Der CI-Pfad wurde von einem vollständigen AOSP-Quellbuild auf ein verifiziertes Android-5.0.2-ARM-Emulator-Systemimage umgestellt. **Die neue GitHub-Actions-Pipeline wurde noch nicht ausgeführt und ein echter Libra Colour stand nicht zum Testen zur Verfügung.** Das Ergebnis bleibt ein experimenteller Chroot-Portierungsversuch.
+## Auswertung der Kobo-Logs
 
-## Bereits geprüft
+Die bereitgestellten Logs enthalten den Rootfs-Marker `android-5.0.2_api21`; sie stammen damit von einem Lollipop/API-21-Rootfs und **nicht** von dem hier gewünschten KitKat/API-19-Build. Die Logs dokumentieren dennoch konkrete Fehler im gemeinsamen Startpfad:
 
-Das offizielle Google-SDK-Archiv `armeabi-v7a-21_r04.zip` wurde heruntergeladen. Seine SHA-256-Prüfsumme stimmt mit `4f20bb4abff1fcda7fdde510993d2004b0ca330ae6e7a798ffecc3fbf6d48520` überein. Das Image enthält Android 5.0.2/API 21 ARM EABI v7a, ext4 `/system`, Ramdisk, Emulator-Kernel und Android-Apps. Die nötigen Framework-Apps, Software-GLES, Default-Gralloc und Android-Notice-Datei wurden in der Partition gefunden. Der Emulator-Kernel wird nicht übernommen; die EGL-Konfiguration und Emulator-Emulationsbibliotheken werden angepasst.
+- `logcat` zeigt `BatteryService.<init>` mit `NullPointerException` und anschließend `BOOT FAILURE making display ready`. `healthd.txt` meldet `Service batteryproperties: not found`; `bootwatch.log` zeigt `healthd=restarting`. Das belegt, dass der Akku-Properties-Binder-Dienst nicht verfügbar war.
+- `logcat` enthält wiederholt `logwrapper: Cannot create parent ptty`. Die angepasste Init hatte `/dev/pts` erzeugt, aber nicht `devpts` gemountet. Netd-/iptables-Aufrufe scheiterten ebenfalls.
+- `stages.log` zeigt zusätzlich einen Segfault beim direkten `/system/bin/sh`-Probe. Der spätere normale Start lief aber deutlich weiter bis Zygote und SystemServer; der Probe-Fehler darf daher nicht mit dem dokumentierten Framework-Bootfehler gleichgesetzt werden.
 
-Das offizielle Android-NDK r10e wurde heruntergeladen. Die SHA-256-Prüfsumme ist `ee5f405f3b57c4f5c3b3b8b5d495ae12b660e03d2112e4ed5c728d349f1e520c`. Der Compiler kann in dieser ARM64-Entwicklungsumgebung nicht ausgeführt werden, da das historische NDK ausschließlich einen x86-64-Hostcompiler enthält. GitHub `ubuntu-24.04` ist x86-64; die eigentliche Bionic-Kompilierung muss dort im ersten CI-Lauf verifiziert werden.
+## Umgesetzte Änderungen
 
-Vor der Umstellung bestanden 36 Python-Tests und 12 Lua-RFB-Assertions. Diese Tests prüfen Host-Laufzeit, Paketierung und Fixtures; sie beweisen nicht den Android-Boot. Die neu hinzugefügten Workflowtests prüfen, dass der manuelle Job nur die fest gepinnten SDK-/NDK-Downloads und Native-Builds verwendet und keinen `repo sync`, AOSP-Vollbuild oder LVM-Disk-Workaround mehr startet.
+1. Die KitKat-Init bindet `devpts` unter dem Android-eigenen `/dev/pts` ein und verlinkt `/dev/ptmx`, damit `logwrapper` und Subprozesse PTYs erhalten.
+2. `healthd` ist als nicht-kritischer Dienst hinter `servicemanager` angeordnet und wird erst gestartet, nachdem dessen Status `running` erreicht ist. Damit erhält es die Voraussetzung, `batteryproperties` über Binder zu registrieren.
+3. Der Build ist auf Android KitKat/API 19 festgelegt. Das API-19-SDK-Archiv ist mit der SHA-256-Prüfsumme `ca7440cade53d829a8cace857cfad9afaa174c286d1b7a5d139e73cfcfde45d7` gepinnt; Workflow, Paketnamen, Rootfs-Marker und Dokumentation wurden von den veralteten API-21/Lollipop-Angaben bereinigt.
 
-## Binder-Shim (2. November 2026)
+## Verifikation und offene Punkte
 
-`native/kobo_binder.c` ist gegen die echte uapi-Header-Datei (beide Konfigurationen, `tests/binder_abi_check_*.c`) und gegen einen simulierten 64-Bit-Binder-Kernel (`tests/binder_shim_test.c`, ARM32 unter qemu-user) geprüft: Transaktionen mit Objekten in beide Richtungen, Reply, Status-Codes, Death-Notifications, Teilverbrauch des Schreibstroms, Fehlerpfade, Speicherfreigabe. Gegen einen echten Binder-Treiber, Bionic-libbinder oder auf dem Gerät wurde er **nicht** ausgeführt. Mögliche weitere Blocker nach dem Binder: SELinux-`load_policy` des Stock-init, SurfaceFlinger/Gralloc, Zygote-Speicherbedarf.
+Die Hosttests laufen mit **42 Testfällen: 38 erfolgreich, 4 übersprungen**; Shellsyntax, ShellCheck und `git diff --check` sind ebenfalls sauber. Das API-19-Archiv wurde heruntergeladen und die feste Prüfsumme verifiziert. Der komplette SDK-Stagingpfad fand die benötigten KitKat-Dateien, aber die native Kompilierung konnte in dieser ARM64-Sandbox nicht ausgeführt werden: Das historische NDK r10e enthält nur einen x86-64-Hostcompiler (`Exec format error`). GitHub Actions läuft auf x86-64 und muss den Build noch bestätigen.
 
-## Noch offen
+Der aktuelle Satz Kobo-Logs stammt laut Rootfs-Marker von API 21 und kann die KitKat-Änderungen nicht validieren. Ein echter Libra-Colour-Boot mit API 19 ist ebenfalls noch nicht nachgewiesen. Nach Aktualisierung muss auf dem Gerät `getprop sys.boot_completed` schließlich `1` liefern; außerdem müssen `batteryproperties` im ServiceManager erscheinen und die PTY-/iptables-Fehler verschwinden.
 
-Der neue Workflow muss auf GitHub erfolgreich ARM32-Bionic-Helper kompilieren, die Systempartition und Ramdisk übernehmen, ein ext4-Rootfs bilden und das ZIP hochladen. Erst danach wissen wir, ob das Paketierungsformat mit diesem SDK-Image konsistent ist. Eine CI-Erzeugung bestätigt noch nicht, dass Android auf echter Kobo-Firmware startet.
-
-Auf dem Gerät sind insbesondere Binder/Ashmem, Namespaces, Loop/ext4, Bionic-Prozessstart, Framebuffer-Preload, Software-Gralloc, SurfaceFlinger, Systemserver, Touch und E-Ink-Darstellung zu testen. Der SDK-Build ist ein Emulator-Image, kein Kobo-ROM und enthält keine herstellerspezifischen Kobo-HALs. `sh android.sh check` prüft Voraussetzungen; für einen erfolgreichen Framework-Boot muss `sh android.sh exec getprop sys.boot_completed` schließlich `1` ausgeben.
-
-Keine Kobo-Daten wurden verändert, keine Firmwarepartition beschrieben und keine Kernelmodule geladen. RAM-Werte, Laufzeit auf dem Gerät, Akkulaufzeit, Suspend-Verhalten und APK-Kompatibilität sind nicht gemessen.
+Hosttests starten Android nicht und beweisen keinen Geräteboot. Kein Firmware- oder Kernelimage wird geschrieben. Die zusätzlichen Init-Mounts liegen unter dem Android-Rootfs, sollten aber wegen des auf älteren Kobo-Kerneln verwendeten, weniger isolierten Chroot-Fallbacks auf dem Zielgerät kontrolliert geprüft werden.

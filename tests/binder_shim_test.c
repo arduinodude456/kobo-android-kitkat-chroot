@@ -180,7 +180,7 @@ static long fake_sys(int fd, unsigned long request, void *arg)
     errno = ENOTTY; return -1;
 }
 
-/* ============================ "Android 5" userspace ============================ */
+/* ============================ "KitKat API 19" userspace ============================ */
 static uint8_t W[8192], R[8192];
 static size_t wl;
 static void wc(uint32_t cmd, const void *pl, size_t n)

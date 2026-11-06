@@ -176,8 +176,8 @@ int kobo_input_key(struct kobo_input *i, uint32_t sym, int down)
     i->keys[code] = !!down; return 0;
 }
 
-struct binder_version_lollipop { int32_t protocol_version; };
-#define LOLLIPOP_BINDER_VERSION _IOWR('b', 9, struct binder_version_lollipop)
+struct binder_version_kitkat { int32_t protocol_version; };
+#define ANDROID_BINDER_VERSION_32BIT _IOWR('b', 9, struct binder_version_kitkat)
 /* Android ashmem uses the Linux UAPI magic 0x77 ('w'), not 'a'. */
 #define KOBO_ASHMEM_SET_SIZE _IOW(0x77, 3, size_t)
 #define KOBO_ASHMEM_GET_SIZE _IO(0x77, 4)
@@ -189,17 +189,17 @@ int kobo_probe(void)
 {
     int failed = 0, fd, status; pid_t pid; struct kobo_input input;
     const char *p = device_env("KOBO_BINDER_DEVICE", "/dev/binder");
-    struct binder_version_lollipop v;
+    struct binder_version_kitkat v;
     fd = open(p, O_RDWR | O_CLOEXEC); memset(&v, 0, sizeof(v));
     if (fd < 0) { fprintf(stderr, "binder: cannot open %s: %s\n", p, strerror(errno)); failed = 1; }
     else {
-        if (ioctl(fd, LOLLIPOP_BINDER_VERSION, &v) < 0) {
+        if (ioctl(fd, ANDROID_BINDER_VERSION_32BIT, &v) < 0) {
             fprintf(stderr, "binder: BINDER_VERSION on %s: %s\n", p, strerror(errno)); failed = 1;
         } else if (v.protocol_version != 7 && v.protocol_version != 8) {
             fprintf(stderr, "binder: unsupported protocol %d, need Android Binder protocol 7 or 8\n", v.protocol_version); failed = 1;
         } else if (v.protocol_version == 8) {
             /* 64-bit binder ABI (kernel without CONFIG_ANDROID_BINDER_IPC_32BIT).
-             * Android 5 speaks the 32-bit ABI; libkobofb.so (kobo_binder.c)
+             * KitKat API 19 speaks the 32-bit ABI; libkobofb.so (kobo_binder.c)
              * translates BINDER_VERSION and BINDER_WRITE_READ in every process. */
             fprintf(stderr, "binder: protocol 8 (64-bit ABI), translated by libkobofb.so\n");
         } else fprintf(stderr, "binder: protocol 7 OK\n");

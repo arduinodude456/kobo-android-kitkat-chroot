@@ -1,27 +1,30 @@
 # Vorgefertigte Android-Quellen und Anpassungen
 
-Die schnelle Pipeline kompiliert **nicht** den vollständigen AOSP-Quellbaum. Sie lädt das offizielle Android-SDK-Systemimage `armeabi-v7a-21_r04.zip` direkt von Google. Es ist Android 5.0.2/API 21, `armeabi-v7a`, SDK-Build 3079185. Die SHA-256-Prüfsumme ist `4f20bb4abff1fcda7fdde510993d2004b0ca330ae6e7a798ffecc3fbf6d48520`. Das Archiv enthält eine ext4-Systempartition, eine Emulator-Ramdisk und einen QEMU-Kernel; der QEMU-Kernel wird nicht in das Kobo-Paket übernommen.
+Die schnelle Pipeline kompiliert **nicht** den vollständigen AOSP-Quellbaum. Sie lädt das offizielle Google-SDK-Systemimage `armeabi-v7a-19_r05.zip` für **Android KitKat/API 19, ARM EABI v7a** herunter. Die SHA-256-Prüfsumme des Archivs ist `ca7440cade53d829a8cace857cfad9afaa174c286d1b7a5d139e73cfcfde45d7`. Das Archiv enthält die Systempartition und Emulator-Ramdisk; der QEMU-Kernel wird nicht in das Kobo-Paket übernommen.
 
-Die Pipeline übernimmt `/system` mit erhaltenen Eigentümern, Modi, Symlinks und Dateisystemrechten aus dem ext4-Image. Aus der Ramdisk werden init, Properties und der generierte `BOOTCLASSPATH` übernommen. Die Standard-Emulator-Init-Konfiguration wird durch die isolierte Kobo-Init ersetzt. Emulator-EGL/GLES-Emulationsbibliotheken werden entfernt und Software-EGL aktiviert. Geräte-Properties und kleine Dalvik-Heaps werden auf den experimentellen Kobo-Chroot angepasst.
+Die Pipeline übernimmt `/system` einschließlich Eigentümern, Modi, Symlinks und Dateisystemrechten. Aus der Ramdisk werden init, Properties und der erzeugte `BOOTCLASSPATH` übernommen. Die Emulator-Init-Konfiguration wird durch die isolierte Kobo-Chroot-Konfiguration ersetzt. Emulator-EGL/GLES-Emulationsbibliotheken werden entfernt und Software-EGL aktiviert.
 
-Die kleine native Anpassung wird mit dem offiziellen Android-NDK r10e für Android API 21 gebaut, URL `https://dl.google.com/android/repository/android-ndk-r10e-linux-x86_64.zip`, SHA-256 `ee5f405f3b57c4f5c3b3b8b5d495ae12b660e03d2112e4ed5c728d349f1e520c`. Es entstehen die Bionic-Framebuffer-Preloadbibliothek `libkobofb.so` sowie statische ARM32-Helfer `kobo-vnc` und `kobo-container`. Der CI-Pfad braucht kein `repo sync`, keinen AOSP-Container und keinen Android-Vollbuild.
+Die nativen Helfer werden mit dem offiziellen Android-NDK r10e für Android API 19 gebaut. NDK-URL: `https://dl.google.com/android/repository/android-ndk-r10e-linux-x86_64.zip`; SHA-256: `ee5f405f3b57c4f5c3b3b8b5d495ae12b660e03d2112e4ed5c728d349f1e520c`. Es entstehen `libkobofb.so` sowie die statischen ARM32-Helfer `kobo-vnc` und `kobo-container`.
 
-## Wichtige Hardwaregrenze
+## Bootkorrekturen aus Kobo-Logs
 
-Das heruntergeladene Image ist ausdrücklich ein **ARM-Emulator-Systemimage**, kein Kobo-Produktimage. Es liefert Android 5.0.2 Framework, Apps, Dalvik, Software-Gralloc und Hinweise. Es enthält keinen Kobo-Kernel und keinen passenden Hersteller-HAL. Die Paketierung führt zu einem prüfbaren, schnellen Portierungsversuch, nicht zu einem nachgewiesenen Boot. Android muss auf dem Zielkernel mindestens mit Binder/Ashmem, Namespaces, Loop/ext4 und Software-Gralloc zusammenarbeiten. Der Kobo-Touchscreen, E-Ink-Refresh und echtes SurfaceFlinger-Rendering sind nicht durch CI-Tests belegt.
+Die mitgelieferten Logs zeigen zwei konkrete Fehlerklassen. Wiederholte Meldungen `logwrapper: Cannot create parent ptty` entstehen, wenn Android `/dev/pts` nur als Verzeichnis anlegt, aber `devpts` nicht einbindet. Das blockiert unter anderem die von KitKat-Netd verwendeten iptables-Aufrufe. Die angepasste Init bindet deshalb `devpts` im Android-privaten `/dev` ein und verlinkt `/dev/ptmx`.
 
-Aktuelle Android-GSIs sind keine direkte Alternative: Google beschreibt Treble-, Bootloader- und Mindestversionsvoraussetzungen für Geräte, auf denen GSIs geflasht werden. Dieser Workflow flasht überhaupt nichts; er startet einen älteren SDK-Userspace im vorhandenen Kobo-Linux-Chroot.
+Außerdem scheiterte `BatteryService` mit einer `NullPointerException`, weil `batteryproperties` nicht im ServiceManager registriert war; `healthd` wurde wiederholt neu gestartet. Die Init startet `healthd` nun erst, wenn `servicemanager` als laufend gemeldet wird. Das ist ein gezielter Fix für den beobachteten Startfehler, aber noch kein erfolgreicher Gerätetest. Die ersten Startlogs enthalten zusätzlich einen direkten Shell-Probe-Segfault; dieser separaten Diagnose ist kein Beleg, dass der spätere Framework-Start selbst an derselben Stelle scheitert.
+
+## Hardwaregrenze
+
+Das Image ist ein **ARM-Emulator-Systemimage**, kein Kobo-Produktimage. Es liefert KitKat-Framework, Apps, Dalvik und generische Software-Gralloc-Treiber, aber keinen Kobo-Kernel und keinen passenden Hersteller-HAL. Ein erfolgreicher Build oder QEMU-Boot belegt nicht, dass Android auf dem Kobo-Kernel startet. Binder/Ashmem, Namespaces, Loop/ext4, Software-Gralloc, Touch und E-Ink-Rendering sind auf der Ziel-Firmware zu prüfen.
 
 ## Workflow und Artefakte
 
-Der Workflow heißt **Android 5.0.2 API-21 ARM image for Kobo (experimental)**. Pushes und Pull Requests führen nur Hosttests aus. Nur `workflow_dispatch` lädt die beiden fest gepinnten Archive, baut native Helfer, erstellt das Rootfs und erzeugt das Paket. Das Joblimit ist 45 Minuten; eine erfolgreiche Ausführung sollte erheblich kürzer als ein Vollbuild sein, ist aber noch nicht in GitHub Actions gemessen.
+Der Workflow heißt **Android KitKat API-19 ARM chroot for Kobo (experimental)**. Pushes und Pull Requests führen Hosttests aus. Nur `workflow_dispatch` lädt die gepinnten SDK-/NDK-Archive, baut die nativen Helfer, erstellt das Rootfs und erzeugt das Installationspaket. Der Build-Job hat ein Zeitlimit von 45 Minuten.
 
-Das Artefakt `kobo-android-lollipop-arm32-experimental` enthält `android-kobo.zip` und die alternative `kobo-android-lollipop.tar.gz`, jeweils mit Prüfsummen. `android-build-provenance-and-logs` enthält Downloadsummen, Build-Modus und Logs, auch im Fehlerfall. Das ext4-Rootfs erhält Android-Dateirechte und Symlinks, die FAT32-Onboard-Speicher sonst nicht bewahren kann.
+Das Artefakt `kobo-android-kitkat-arm32` enthält `android-kobo.zip` und `kobo-android-kitkat.tar.gz`, jeweils mit Prüfsummen. `android-build-provenance-and-logs` enthält Buildmodus und Diagnoseprotokolle, auch im Fehlerfall.
 
 ## Quellen
 
-[1]: https://dl.google.com/android/repository/sys-img/android/armeabi-v7a-21_r04.zip "Offizielles Android-5.0.2-ARMv7a-SDK-Systemimage"
+[1]: https://dl.google.com/android/repository/sys-img/android/armeabi-v7a-19_r05.zip "Offizielles Android-KitKat-API-19-ARMv7a-SDK-Systemimage"
 [2]: https://dl.google.com/android/repository/android-ndk-r10e-linux-x86_64.zip "Offizielles Android-NDK r10e für Linux x86-64"
 [3]: https://developer.android.com/studio/run/managing-avds "Android-Entwicklerdokumentation zu Emulator-Systemimages und AVDs"
-[4]: https://developer.android.com/topic/generic-system-image "Offizielle Android-GSI-Kompatibilitätsvoraussetzungen"
-[5]: https://source.android.com/docs/setup/start/older-versions "Historische AOSP-Hostanforderungen für Android 2.3 bis 8.0"
+[4]: https://source.android.com/docs/setup/start/older-versions "Historische AOSP-Hostanforderungen"

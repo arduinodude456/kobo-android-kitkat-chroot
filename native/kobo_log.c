@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
  * Ersatz fuer den Android-Kernel-Logger (dev/log), den der Kobo-Kernel nicht hat und den es ohne
- * logd in Android 5.0.2 auch nicht gibt. libkobofb.so wird per LD_PRELOAD in jeden Prozess geladen und
+ * logd in Android KitKat/API 19 auch nicht gibt. libkobofb.so wird per LD_PRELOAD in jeden Prozess geladen und
  * ueberlagert die liblog-Einstiegspunkte; die Meldungen landen in KOBO_LOG_FILE (Standard
  * /data/local/tmp/android.log). Kein Android-Header noetig, Signaturen stehen hier. */
 #include <errno.h>

@@ -43,6 +43,7 @@ check() {
     "$BASE/bin/kobo-container" --check
     "$BASE/bin/kobo-vnc" --check
     grep -qw ext4 /proc/filesystems || fail 'Kernel unterstützt kein ext4.'
+    grep -qw devpts /proc/filesystems || fail 'Kernel unterstützt kein devpts; KitKat logwrapper benötigt PTYs.'
     [ -e /dev/loop-control ] || [ -e /dev/loop0 ] || fail 'Kein Loop-Gerät vorhanden.'
     echo 'Kernel-Vorprüfung erfolgreich; dies ersetzt keinen Android-Gerätetest.'
 }
@@ -165,7 +166,7 @@ stages_body() {
     echo "=== STUFE 2: ext4-Image per Loop einbinden"
     mkdir -p "$ROOTFS"
     out=$(mount -t ext4 -o loop,noatime,nosuid "$BASE/rootfs.img" "$ROOTFS" 2>&1) || { bad 2 "$out"; return 1; }
-    [ -f "$ROOTFS/kobo-chroot" ] || { bad 2 "Sicherheitsmarker kobo-chroot fehlt"; return 1; }
+    [ -f "$ROOTFS/kobo-chroot" ] && [ "$(cat "$ROOTFS/kobo-chroot")" = 'android-kitkat_api19' ] || { bad 2 "KitKat/API-19-Rootfs fehlt (altes Image sichern, rootfs.img entfernen und neu installieren)"; return 1; }
     echo "Rootfs-Marker: $(cat "$ROOTFS/kobo-chroot")  Dateien in /system/bin: $(ls "$ROOTFS/system/bin" | wc -l)"
     ok 2
     echo "=== STUFE 3: Android-Shell im Chroot (ARM-Linker, bionic)"
@@ -284,7 +285,7 @@ run() {
     mkdir -p "$ROOTFS" "$RUN/shared"
     mounted "$ROOTFS" && fail 'Rootfs ist bereits gemountet.'
     mount -t ext4 -o loop,noatime,nosuid "$BASE/rootfs.img" "$ROOTFS"
-    [ -f "$ROOTFS/kobo-chroot" ] || fail 'Falsches Rootfs: Sicherheitsmarker fehlt.'
+    [ -f "$ROOTFS/kobo-chroot" ] && [ "$(cat "$ROOTFS/kobo-chroot")" = 'android-kitkat_api19' ] || fail 'Falsches Rootfs: KitKat/API-19-Image erforderlich. Altes rootfs.img sichern, entfernen und neu installieren.'
     patch_init_rc
     mkdir -p "$ROOTFS/data/local/tmp"
     chmod 0777 "$ROOTFS/data/local/tmp"

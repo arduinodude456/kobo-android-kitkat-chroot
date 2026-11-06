@@ -63,6 +63,10 @@ class RuntimeTests(unittest.TestCase):
         for path in (ROOT / 'runtime').glob('*.sh'):
             subprocess.run(['sh', '-n', str(path)], check=True)
 
+    def test_kernel_preflight_requires_devpts(self):
+        source = (ROOT / 'runtime/android.sh').read_text()
+        self.assertIn('grep -qw devpts /proc/filesystems', source)
+
     def test_container_compiles_strictly(self):
         with tempfile.TemporaryDirectory() as tmp:
             subprocess.run(['gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
@@ -89,8 +93,11 @@ class RuntimeTests(unittest.TestCase):
             stage = base / 'stage'
             with mock.patch.object(builder, 'validate'):
                 builder.prepare(product, stage)
-            self.assertEqual((stage / 'kobo-chroot').read_text(), 'android-5.0.2_api21\n')
-            self.assertIn('"$ROOTFS/kobo-chroot"', (ROOT / 'runtime/android.sh').read_text())
+            self.assertEqual((stage / 'kobo-chroot').read_text(), 'android-kitkat_api19\n')
+            runtime = (ROOT / 'runtime/android.sh').read_text()
+            self.assertIn('"$ROOTFS/kobo-chroot"', runtime)
+            self.assertIn("= 'android-kitkat_api19'", runtime)
+            self.assertIn('KitKat/API-19-Image erforderlich', runtime)
             self.assertIn('access("/kobo-chroot", F_OK)', (ROOT / 'runtime/kobo-container.c').read_text())
             with self.assertRaises(ValueError):
                 builder.image(stage, base / 'too-large.img', 4096)

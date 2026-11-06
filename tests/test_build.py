@@ -104,18 +104,28 @@ class WorkflowTests(unittest.TestCase):
         self.assertLess(rootfs, package)
         self.assertIn("if: github.event_name == 'workflow_dispatch'", workflow)
         self.assertIn('timeout-minutes: 45', workflow)
-        self.assertIn('kobo-android-lollipop-arm32-${{ github.sha }}', workflow)
+        self.assertIn('kobo-android-kitkat-arm32-${{ github.sha }}', workflow)
+        self.assertIn("options: ['19']", workflow)
+        self.assertNotIn("options: ['19', '21']", workflow)
         self.assertNotIn('maximize-build-space', workflow)
         self.assertNotIn('scripts/01-source.sh', workflow)
         self.assertNotIn('scripts/02-aosp.sh', workflow)
 
     def test_prebuilt_sources_are_pinned_and_checksum_verified(self):
         script = (ROOT / 'scripts/00-prebuilt-sdk.sh').read_text()
-        self.assertIn('armeabi-v7a-21_r04.zip', script)
+        self.assertIn('armeabi-v7a-19_r05.zip', script)
         self.assertIn('android-ndk-r10e-linux-x86_64.zip', script)
-        self.assertIn('4f20bb4abff1fcda7fdde510993d2004b0ca330ae6e7a798ffecc3fbf6d48520', script)
+        self.assertIn('ca7440cade53d829a8cace857cfad9afaa174c286d1b7a5d139e73cfcfde45d7', script)
         self.assertIn('ee5f405f3b57c4f5c3b3b8b5d495ae12b660e03d2112e4ed5c728d349f1e520c', script)
         self.assertIn('sha256sum --check', script)
+
+    def test_kitkat_init_mounts_pts_and_orders_healthd_after_servicemanager(self):
+        initrc = (ROOT / 'android/device/kobo/libra_colour/init.rc').read_text()
+        self.assertIn('mount devpts devpts /dev/pts', initrc)
+        self.assertIn('symlink /dev/pts/ptmx /dev/ptmx', initrc)
+        self.assertLess(initrc.index('service servicemanager '), initrc.index('service healthd '))
+        self.assertIn('on property:init.svc.servicemanager=running\n    start healthd', initrc)
+        self.assertIn('android-kitkat_api19', (ROOT / 'scripts/rootfs.py').read_text())
 
 
 class RootfsTests(unittest.TestCase):
@@ -156,8 +166,9 @@ class RootfsTests(unittest.TestCase):
         text = (ROOT / 'android/device/kobo/libra_colour/init.rc').read_text()
         actions = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith('#')]
         self.assertEqual([line for line in actions if line.startswith('import ')], ['import /init.environ.rc'])
-        for unsafe in ('mount ', 'write /sys/', 'write /proc/sys/', 'setenforce ', 'start ueventd', 'powerctl '):
+        for unsafe in ('mount sysfs ', 'mount proc ', 'mount tmpfs ', 'write /sys/', 'write /proc/sys/', 'setenforce ', 'start ueventd', 'powerctl '):
             self.assertFalse(any(line.startswith(unsafe) for line in actions), unsafe)
+        self.assertIn('mount devpts devpts /dev/pts', actions)
         self.assertTrue(any('--start-system-server' in line for line in actions))
 
 

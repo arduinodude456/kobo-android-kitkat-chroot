@@ -73,7 +73,7 @@ def prepare(product, stage):
         if mountpoint.is_symlink() or mountpoint.is_file():
             mountpoint.unlink()
         mountpoint.mkdir(parents=True, exist_ok=True)
-    (stage / 'kobo-chroot').write_text('android-5.0.2_api21\n')
+    (stage / 'kobo-chroot').write_text('android-kitkat_api19\n')
     validate(stage)
 
 

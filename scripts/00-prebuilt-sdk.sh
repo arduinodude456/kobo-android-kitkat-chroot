@@ -2,22 +2,12 @@
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 
-# ANDROID_API=19 (KitKat, default, experimental, unpinned: the
-# first run prints the archive's SHA-256 so it can be pinned afterwards).
 ANDROID_API="${ANDROID_API:-19}"
+[[ "$ANDROID_API" = 19 ]] || { echo 'This Kobo chroot is KitKat-only: ANDROID_API must be 19' >&2; exit 1; }
 NDK_URL='https://dl.google.com/android/repository/android-ndk-r10e-linux-x86_64.zip'
 NDK_SHA256='ee5f405f3b57c4f5c3b3b8b5d495ae12b660e03d2112e4ed5c728d349f1e520c'
-case "$ANDROID_API" in
-    21)
-        SDK_URL='https://dl.google.com/android/repository/sys-img/android/armeabi-v7a-21_r04.zip'
-        SDK_SHA256='4f20bb4abff1fcda7fdde510993d2004b0ca330ae6e7a798ffecc3fbf6d48520'
-        ;;
-    19)
-        SDK_URL="${SDK_URL_OVERRIDE:-https://dl.google.com/android/repository/sys-img/android/armeabi-v7a-19_r05.zip}"
-        SDK_SHA256="${SDK_SHA256_OVERRIDE:-}"
-        ;;
-    *) echo "ANDROID_API must be 19 or 21" >&2; exit 1 ;;
-esac
+SDK_URL='https://dl.google.com/android/repository/sys-img/android/armeabi-v7a-19_r05.zip'
+SDK_SHA256='ca7440cade53d829a8cace857cfad9afaa174c286d1b7a5d139e73cfcfde45d7'
 NDK_PLATFORM="android-$ANDROID_API"
 DOWNLOADS="$BUILD/downloads"
 SDK_ZIP="$DOWNLOADS/sdk$ANDROID_API-arm.zip"
@@ -32,9 +22,8 @@ fetch_verified() {
     local url="$1" file="$2" checksum="$3"
     if [[ -z "$checksum" ]]; then
         [[ -f "$file" ]] || curl --fail --location --retry 3 --retry-delay 2 "$url" --output "$file"
-        echo "WARNING: $file is NOT pinned. Computed SHA-256 (pin it in this script after review):"
-        sha256sum "$file"
-        return 0
+        echo "ERROR: no SHA-256 pin supplied for $url" >&2
+        return 1
     fi
     if [[ ! -f "$file" ]] || ! echo "$checksum  $file" | sha256sum --check --status; then
         curl --fail --location --retry 3 --retry-delay 2 "$url" --output "$file"
@@ -53,13 +42,13 @@ unzip -q "$NDK_ZIP" \
 
 SDK_IMAGE="$SDK_DIR/armeabi-v7a"
 [[ -s "$SDK_IMAGE/system.img" && -s "$SDK_IMAGE/ramdisk.img" ]] || {
-    echo 'Pinned SDK archive did not contain the expected API-21 ARM image' >&2; exit 1;
+    echo 'Pinned SDK archive did not contain the expected API-19 KitKat ARM image' >&2; exit 1;
 }
 file "$SDK_IMAGE/system.img" | tee "$BUILD/logs/system-img-type.txt"
 SYSTEM_IS_EXT4=1
 file "$SDK_IMAGE/system.img" | grep -qiE 'ext[234]' || SYSTEM_IS_EXT4=0
 if [[ "$SYSTEM_IS_EXT4" = 0 ]]; then
-    # KitKat (API 19) SDK images ship system.img as YAFFS2, not ext4.
+    # Keep a YAFFS2 fallback for repackaged API-19 images; the pinned r05 archive is ext4.
     sudo apt-get install -y unyaffs >/dev/null 2>&1 || true
     command -v unyaffs >/dev/null || { echo "system.img is neither ext4 nor unpackable (unyaffs missing); see build/logs/system-img-type.txt" >&2; exit 1; }
     mkdir -p "$BUILD/yaffs-out"
@@ -104,8 +93,8 @@ values = {
     'ro.product.model': 'Libra Colour Android Chroot',
     'ro.product.manufacturer': 'community',
     'ro.hardware': 'kobo_libra_colour',
-    # Lollipop-libEGL (Loader::open) waehlt libGLES_android.so (Software-GL) nur bei qemu=1 + qemu.gles=0
-    # (so bootet das funktionierende QEMU-Referenzimage) oder ueber ro.hardware.egl. Sonst sucht es nach
+    # KitKat-libEGL (Loader::open) waehlt libGLES_android.so (Software-GL) bei qemu=1 + qemu.gles=0
+    # (wie im bootenden QEMU-Referenzimage) oder ueber ro.hardware.egl. Sonst sucht es nach
     # libGLES_<ro.hardware>.so, findet nichts und surfaceflinger stirbt in eglGetDisplay (LOG_ALWAYS_FATAL).
     'ro.kernel.qemu': '1',
     'ro.kernel.qemu.gles': '0',
@@ -174,15 +163,15 @@ sudo install -o root -g root -m 0755 "$NATIVE/kobo-container" "$PRODUCT/system/b
 
 cat > "$BUILD/source-manifest.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
-<prebuilt id="android-5.0.2-api21-armv7a" source="Google Android SDK system image" url="https://dl.google.com/android/repository/sys-img/android/armeabi-v7a-21_r04.zip" sha256="4f20bb4abff1fcda7fdde510993d2004b0ca330ae6e7a798ffecc3fbf6d48520" />
+<prebuilt id="android-kitkat-api19-armv7a" source="Google Android SDK system image" url="https://dl.google.com/android/repository/sys-img/android/armeabi-v7a-19_r05.zip" sha256="ca7440cade53d829a8cace857cfad9afaa174c286d1b7a5d139e73cfcfde45d7" />
 EOF
-printf '%s\n' 'Android SDK API 21 ARM EABI v7a system image, build 3079185 (5.0.2)' > "$BUILD/AOSP-RELEASE.txt"
-printf '%s\n' 'prebuilt-system-image-sha256:4f20bb4abff1fcda7fdde510993d2004b0ca330ae6e7a798ffecc3fbf6d48520' > "$BUILD/REPO-REVISION.txt"
+printf '%s\n' 'Android SDK API 19 KitKat ARM EABI v7a system image' > "$BUILD/AOSP-RELEASE.txt"
+printf '%s\n' 'prebuilt-system-image-sha256:ca7440cade53d829a8cace857cfad9afaa174c286d1b7a5d139e73cfcfde45d7' > "$BUILD/REPO-REVISION.txt"
 cat > "$BUILD/patches.json" <<'EOF'
 {"mode":"prebuilt-sdk-adaptation","changes":["replace emulator init with isolated Kobo init","set low-RAM software-rendered Kobo properties","remove emulator EGL/GLES shims","build Bionic framebuffer and Kobo helpers with NDK r10e"]}
 EOF
 cat > "$BUILD/build-container.json" <<'EOF'
-{"mode":"prebuilt-download-and-small-native-build","sdk":"Android 5.0.2 API 21 ARM EABI v7a","ndk":"r10e","aosp-full-source-build":false}
+{"mode":"prebuilt-download-and-small-native-build","sdk":"Android KitKat API 19 ARM EABI v7a","ndk":"r10e","aosp-full-source-build":false}
 EOF
-printf 'Prebuilt API-21 ARM SDK staged; only native helpers were compiled.\n'
+printf 'Pinned KitKat API-19 ARM SDK staged; only native helpers were compiled.\n'
 df -h "$BUILD" | tee "$BUILD/logs/disk-after-prebuilt.log"

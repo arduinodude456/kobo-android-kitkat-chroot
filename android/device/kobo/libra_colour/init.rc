@@ -16,7 +16,10 @@ on init
     export KOBO_FB_FILE /dev/kobo/fb.bin
     export KOBO_FB_META /dev/kobo/fb.meta
     export KOBO_BINDER_LOG /data/local/tmp/kobo-binder.log
-    # liblog-Ersatz in libkobofb.so (kein /dev/log, kein logd in Android 5.0.2)
+    # KitKat logwrapper und iptables brauchen echte PTYs; mkdir /dev/pts allein reicht nicht.
+    mount devpts devpts /dev/pts
+    symlink /dev/pts/ptmx /dev/ptmx
+    # liblog-Ersatz in libkobofb.so (KitKat ohne /dev/log-Logger)
     export KOBO_LOG_FILE /data/local/tmp/android.log
     # zygote crasht beim Preload mit NullPointerException (android.os.Debug / Environment), wenn
     # EXTERNAL_STORAGE fehlt: new File(System.getenv("EXTERNAL_STORAGE")). Das Emulator-init.goldfish.rc,
@@ -135,14 +138,6 @@ on boot
 service debuggerd /system/bin/debuggerd
     class main
 
-# Android 4.4 BatteryService holt sich den Akkustatus ueber den Binder-Dienst "batteryproperties", den nur
-# healthd veroeffentlicht. Fehlt healthd, ist der Dienst null -> NullPointerException in
-# BatteryService.<init>; der ganze Core-Service-Block von system_server bricht ab (WindowManager = null,
-# "BOOT FAILURE making display ready", showBootMessage-NPE) und zygote startet system_server dauernd neu.
-# Bewusst OHNE "critical": ein Absturz soll den Kobo nicht neu starten.
-service healthd /sbin/healthd
-    class core
-
 service servicemanager /system/bin/servicemanager
     class core
     user system
@@ -152,6 +147,16 @@ service servicemanager /system/bin/servicemanager
     onrestart restart zygote
     onrestart restart media
     onrestart restart drm
+
+# KitKat BatteryService braucht batteryproperties. healthd muss nach dem Binder-Manager starten,
+# sonst beendet sich die Registrierung und system_server stuerzt mit NPE in BatteryService ab.
+# Nicht critical: ein healthd-Fehler darf niemals den Kobo-Host neu starten.
+service healthd /sbin/healthd
+    class core
+    disabled
+
+on property:init.svc.servicemanager=running
+    start healthd
 
 service surfaceflinger /system/bin/surfaceflinger
     class main
@@ -165,7 +170,7 @@ service media /system/bin/mediaserver
     user media
     group audio camera inet net_bt net_bt_admin net_bw_acct drmrpc mediadrm
 
-# KitKat/Lollipop system_server blocks in NetworkManagementService until netd's socket exists.
+# KitKat system_server blocks in NetworkManagementService until netd's socket exists.
 service netd /system/bin/netd
     class main
     socket netd stream 0660 root system

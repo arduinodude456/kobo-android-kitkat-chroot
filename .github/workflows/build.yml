@@ -1,13 +1,13 @@
-name: Android 5.0.2 API-21 ARM image for Kobo (experimental)
+name: Android KitKat API-19 ARM chroot for Kobo (experimental)
 
 on:
   workflow_dispatch:
     inputs:
       android_api:
-        description: 'Android API: 21 = Lollipop 5.0.2, 19 = KitKat 4.4 (experimentell)'
+        description: 'Android API (dieses Projekt verwendet KitKat)'
         type: choice
         default: '19'
-        options: ['19', '21']
+        options: ['19']
   push:
     branches: [main]
   pull_request:
@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: android-lollipop-${{ github.ref }}
+  group: android-kitkat-${{ github.ref }}
   cancel-in-progress: true
 
 defaults:
@@ -59,7 +59,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential python3 cpio curl unzip gzip \
             e2fsprogs rsync file binutils
-      - name: Download verified Android 5.0.2 ARM SDK image and build Kobo helpers
+      - name: Download pinned Android KitKat API-19 ARM SDK image and build Kobo helpers
         run: |
           set -o pipefail
           bash scripts/00-prebuilt-sdk.sh 2>&1 | tee build-prebuilt.log
@@ -74,14 +74,14 @@ jobs:
       - name: Upload install package
         uses: actions/upload-artifact@v4
         with:
-          name: kobo-android-lollipop-arm32-${{ github.sha }}
+          name: kobo-android-kitkat-arm32-${{ github.sha }}
           if-no-files-found: error
           compression-level: 0
           path: |
             dist/android-kobo.zip
             dist/android-kobo.zip.sha256
-            dist/kobo-android-lollipop.tar.gz
-            dist/kobo-android-lollipop.tar.gz.sha256
+            dist/kobo-android-kitkat.tar.gz
+            dist/kobo-android-kitkat.tar.gz.sha256
       - name: Upload provenance and logs even on failure
         if: always()
         uses: actions/upload-artifact@v4
