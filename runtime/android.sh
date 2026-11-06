@@ -178,17 +178,19 @@ stages_body() {
     copy_node "$KOBO_BINDER_DEVICE" "$ROOTFS/dev/binder" 0666
     copy_node "$KOBO_ASHMEM_DEVICE" "$ROOTFS/dev/ashmem" 0666
     CHROOT_BIN=$(command -v chroot) || { bad 3 "chroot fehlt"; return 1; }
-    out=$("$CHROOT_BIN" "$ROOTFS" /system/bin/sh -c 'echo SH_OK; ls /system' 2>&1)
+    # Host-Environment (LD_LIBRARY_PATH von KOReader!) darf nicht in Android-Prozesse: Segfault im bionic-Linker
+    ENVB=$(command -v env)
+    out=$("$ENVB" -i PATH=/system/bin "$CHROOT_BIN" "$ROOTFS" /system/bin/sh -c 'echo SH_OK; ls /system' 2>&1)
     echo "$out"
     case "$out" in *SH_OK*) ok 3 ;; *) bad 3 "Android-sh startet nicht"; return 1 ;; esac
     echo "=== STUFE 4: Binder-ABI Ende-zu-Ende (servicemanager + 'service list' mit Shim)"
     rm -f "$ROOTFS/data/local/tmp/kobo-binder.log"
     PRE='export LD_PRELOAD=/system/lib/libkobofb.so KOBO_BINDER_LOG=/data/local/tmp/kobo-binder.log'
-    "$CHROOT_BIN" "$ROOTFS" /system/bin/sh -c "$PRE; exec /system/bin/servicemanager" > "$RUN/sm.out" 2>&1 &
+    "$ENVB" -i PATH=/system/bin "$CHROOT_BIN" "$ROOTFS" /system/bin/sh -c "$PRE; exec /system/bin/servicemanager" > "$RUN/sm.out" 2>&1 &
     smpid=$!
     sleep 3
     if kill -0 "$smpid" 2>/dev/null; then echo "servicemanager laeuft (PID $smpid)"; else echo "servicemanager ist sofort beendet:"; cat "$RUN/sm.out"; fi
-    out=$("$CHROOT_BIN" "$ROOTFS" /system/bin/sh -c "$PRE; /system/bin/service list" 2>&1)
+    out=$("$ENVB" -i PATH=/system/bin "$CHROOT_BIN" "$ROOTFS" /system/bin/sh -c "$PRE; /system/bin/service list" 2>&1)
     echo "service list: $out"
     kill "$smpid" 2>/dev/null; sleep 1; kill -KILL "$smpid" 2>/dev/null
     echo "--- servicemanager-Ausgabe:"; cat "$RUN/sm.out" 2>/dev/null
@@ -213,6 +215,7 @@ stages() {
 # ---- Diagnose: Boot-Zeitachse (laeuft waehrend run im Hintergrund) -> bootwatch.log ---------------
 bootwatch() {
     set +e
+    ENVB=$(command -v env); CHROOTB=$(command -v chroot)
     w="$BASE/bootwatch.log"; : > "$w"; i=0
     gp() { chroot "$ROOTFS" /system/bin/getprop "$1" 2>/dev/null | tr -d '\r'; }
     {
@@ -226,11 +229,19 @@ bootwatch() {
     while [ "$i" -lt 60 ] && kill -0 "$container_pid" 2>/dev/null; do
         sleep 10; i=$((i + 1)); n=0
         for d in /proc/[0-9]*; do [ "$(readlink "$d/root" 2>/dev/null)" = "$ROOTFS" ] && n=$((n + 1)); done
-        echo "$(date +%T) t=${i}0s procs=$n boot=$(gp sys.boot_completed) sm=$(gp init.svc.servicemanager) sf=$(gp init.svc.surfaceflinger) zygote=$(gp init.svc.zygote) netd=$(gp init.svc.netd) frei_kb=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)" >> "$w"
+        echo "$(date +%T) t=${i}0s procs=$n boot=$(gp sys.boot_completed) sm=$(gp init.svc.servicemanager) sf=$(gp init.svc.surfaceflinger) zygote=$(gp init.svc.zygote) netd=$(gp init.svc.netd) healthd=$(gp init.svc.healthd) frei_kb=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)" >> "$w"
         # Absturzursache sichtbar machen: logcat (Fehler/Fatal) und neuester Tombstone
         tail -n 150 "$ROOTFS/data/local/tmp/android.log" > "$BASE/logcat.txt" 2>&1
+        {
+            echo "init.svc.healthd=$(gp init.svc.healthd)"
+            echo "--- ps (Android-Prozesse):"
+            for d in /proc/[0-9]*; do [ "$(readlink "$d/root" 2>/dev/null)" = "$ROOTFS" ] && echo "${d#/proc/} $(cat "$d/comm" 2>/dev/null)"; done
+            echo "--- service check batteryproperties:"
+            "$ENVB" -i PATH=/system/bin LD_PRELOAD=/system/lib/libkobofb.so "$CHROOTB" "$ROOTFS" /system/bin/service check batteryproperties 2>&1
+            echo "--- dmesg healthd/init:"
+            dmesg 2>/dev/null | grep -iE 'healthd|init: (cannot|could not|untracked|service)|init:.*(healthd|exited|killing)' | tail -n 30
+        } > "$BASE/healthd.txt" 2>&1
         tail -n 4000 "$ROOTFS/data/local/tmp/android.log" > "$BASE/android-full.log" 2>&1
-        ls -l "$ROOTFS/sbin/healthd" "$ROOTFS/system/bin/healthd" > "$BASE/healthd.txt" 2>&1
         t=$(ls -t "$ROOTFS"/data/tombstones 2>/dev/null | head -n 1)
         if [ -n "$t" ]; then head -n 60 "$ROOTFS/data/tombstones/$t" > "$BASE/tombstone.txt" 2>/dev/null; fi
         [ "$(gp sys.boot_completed)" = 1 ] && { echo "BOOT FERTIG nach ${i}0s" >> "$w"; break; }

@@ -39,7 +39,7 @@ local function diagnostics()
     if init ~= "" then log = log .. "\n\n--- android-init.log ---\n" .. init end
     if kmsg ~= "" then log = "--- init/kmsg (live) ---\n" .. kmsg .. "\n\n--- android.log ---\n" .. log end
     -- Android-init schreibt per klog in den HOST-Kernel-Log (dmesg), nicht in die Datei dev/kmsg.
-    local dm = run_cmd("dmesg | grep -iE 'init:|binder|ashmem|surfaceflinger|zygote|servicemanager|avc' | tail -n 60", 3000)
+    local dm = run_cmd("dmesg | grep -iE 'init:|binder|ashmem|surfaceflinger|zygote|servicemanager|healthd|avc' | tail -n 60", 3000)
     local ps = run_cmd("ps | grep -iE '/init|zygote|surfaceflinger|servicemanager|system_server|kobo-vnc' | grep -v grep", 1500)
     -- Written by the binder shim inside libkobofb.so (KOBO_BINDER_LOG): proves LD_PRELOAD reached the
     -- Android processes and lists translation errors.
@@ -50,6 +50,8 @@ local function diagnostics()
     local tb = tail_file(BASE .. "/tombstone.txt", 1500)
     if tb ~= "" then log = "--- tombstone ---\n" .. tb .. "\n\n" .. log end
     log = "--- logcat ---\n" .. (lc ~= "" and lc or "(leer: android.log ohne Eintraege)") .. "\n\n" .. log
+    local hd = tail_file(BASE .. "/healthd.txt", 1500)
+    if hd ~= "" then log = "--- healthd ---\n" .. hd .. "\n\n" .. log end
     local egl = tail_file(BASE .. "/egl.txt", 2000)
     if egl ~= "" then log = "--- egl ---\n" .. egl .. "\n\n" .. log end
     log = "--- binder shim ---\n" .. (shim ~= "" and shim or "(leer: Shim wurde in keinem Prozess geladen)") .. "\n\n" .. log
