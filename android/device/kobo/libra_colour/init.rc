@@ -67,6 +67,9 @@ on init
     chmod 0666 /dev/ashmem
     chmod 0666 /dev/alarm
     setprop ro.hardware kobo_libra_colour
+    setprop ro.kernel.qemu 1
+    setprop ro.kernel.qemu.gles 0
+    setprop ro.hardware.egl android
     setprop ro.bootmode unknown
     setprop ro.factorytest 0
     setprop ro.crypto.state unencrypted

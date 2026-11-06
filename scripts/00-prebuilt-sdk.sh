@@ -104,7 +104,12 @@ values = {
     'ro.product.model': 'Libra Colour Android Chroot',
     'ro.product.manufacturer': 'community',
     'ro.hardware': 'kobo_libra_colour',
-    'ro.kernel.qemu': '0',
+    # Lollipop-libEGL (Loader::open) waehlt libGLES_android.so (Software-GL) nur bei qemu=1 + qemu.gles=0
+    # (so bootet das funktionierende QEMU-Referenzimage) oder ueber ro.hardware.egl. Sonst sucht es nach
+    # libGLES_<ro.hardware>.so, findet nichts und surfaceflinger stirbt in eglGetDisplay (LOG_ALWAYS_FATAL).
+    'ro.kernel.qemu': '1',
+    'ro.kernel.qemu.gles': '0',
+    'ro.hardware.egl': 'android',
     'ro.opengles.version': '65536',
     'ro.sf.lcd_density': '160',
     'ro.config.low_ram': 'true',
@@ -154,7 +159,7 @@ NATIVE="$BUILD/native-arm"
 mkdir -p "$NATIVE"
 COMMON=(--sysroot="$SYSROOT" -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16 -Os -g0 -std=gnu99 -Wall -Wextra -Wformat=2)
 "$CC" "${COMMON[@]}" -fPIC -shared -pthread \
-    "$ROOT/native/kobofb.c" "$ROOT/native/kobo_fb.c" "$ROOT/native/kobo_binder.c" \
+    "$ROOT/native/kobofb.c" "$ROOT/native/kobo_fb.c" "$ROOT/native/kobo_binder.c" "$ROOT/native/kobo_log.c" \
     -Wl,-soname,libkobofb.so -o "$NATIVE/libkobofb.so"
 "$CC" "${COMMON[@]}" "$ROOT/native/kobo_vnc.c" "$ROOT/native/kobo_fb.c" \
     "$ROOT/native/kobo_input.c" -static -pthread -lm -o "$NATIVE/kobo-vnc"
