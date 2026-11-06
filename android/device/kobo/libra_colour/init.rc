@@ -91,10 +91,19 @@ on boot
 service debuggerd /system/bin/debuggerd
     class main
 
+# Android 4.4 BatteryService holt sich den Akkustatus ueber den Binder-Dienst "batteryproperties", den nur
+# healthd veroeffentlicht. Fehlt healthd, ist der Dienst null -> NullPointerException in
+# BatteryService.<init>; der ganze Core-Service-Block von system_server bricht ab (WindowManager = null,
+# "BOOT FAILURE making display ready", showBootMessage-NPE) und zygote startet system_server dauernd neu.
+# Bewusst OHNE "critical": ein Absturz soll den Kobo nicht neu starten.
+service healthd /sbin/healthd
+    class core
+
 service servicemanager /system/bin/servicemanager
     class core
     user system
     group system
+    onrestart restart healthd
     onrestart restart surfaceflinger
     onrestart restart zygote
     onrestart restart media

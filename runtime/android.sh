@@ -228,7 +228,9 @@ bootwatch() {
         for d in /proc/[0-9]*; do [ "$(readlink "$d/root" 2>/dev/null)" = "$ROOTFS" ] && n=$((n + 1)); done
         echo "$(date +%T) t=${i}0s procs=$n boot=$(gp sys.boot_completed) sm=$(gp init.svc.servicemanager) sf=$(gp init.svc.surfaceflinger) zygote=$(gp init.svc.zygote) netd=$(gp init.svc.netd) frei_kb=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)" >> "$w"
         # Absturzursache sichtbar machen: logcat (Fehler/Fatal) und neuester Tombstone
-        tail -n 120 "$ROOTFS/data/local/tmp/android.log" > "$BASE/logcat.txt" 2>&1
+        tail -n 150 "$ROOTFS/data/local/tmp/android.log" > "$BASE/logcat.txt" 2>&1
+        tail -n 4000 "$ROOTFS/data/local/tmp/android.log" > "$BASE/android-full.log" 2>&1
+        ls -l "$ROOTFS/sbin/healthd" "$ROOTFS/system/bin/healthd" > "$BASE/healthd.txt" 2>&1
         t=$(ls -t "$ROOTFS"/data/tombstones 2>/dev/null | head -n 1)
         if [ -n "$t" ]; then head -n 60 "$ROOTFS/data/tombstones/$t" > "$BASE/tombstone.txt" 2>/dev/null; fi
         [ "$(gp sys.boot_completed)" = 1 ] && { echo "BOOT FERTIG nach ${i}0s" >> "$w"; break; }

@@ -13,12 +13,12 @@
 
 static void emit(int prio, const char *tag, const char *msg)
 {
-    static const char P[] = "?  VDIWEF";
+    static const char P[] = "??VDIWEF"; /* Prio 2..7 = V D I W E F */
     const char *path = getenv("KOBO_LOG_FILE");
     char buf[1024]; int n, fd, saved = errno;
-    if (prio < 4) return; /* Verbose/Debug weglassen */
+    if (prio < 3) return; /* Verbose weglassen */
     if (!path || !*path) path = "/data/local/tmp/android.log";
-    n = snprintf(buf, sizeof(buf), "%c/%s(%d): %s", prio >= 0 && prio <= 8 ? P[prio] : '?',
+    n = snprintf(buf, sizeof(buf), "%c/%s(%d): %s", prio >= 0 && prio <= 7 ? P[prio] : '?',
                  tag ? tag : "?", (int)getpid(), msg ? msg : "");
     if (n < 0) { errno = saved; return; }
     if ((size_t)n > sizeof(buf) - 2) n = (int)sizeof(buf) - 2;
