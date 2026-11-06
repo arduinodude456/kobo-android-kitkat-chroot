@@ -119,12 +119,22 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('ee5f405f3b57c4f5c3b3b8b5d495ae12b660e03d2112e4ed5c728d349f1e520c', script)
         self.assertIn('sha256sum --check', script)
 
-    def test_kitkat_init_mounts_pts_and_orders_healthd_after_servicemanager(self):
+    def test_kitkat_init_replays_qemu_boot_triggers(self):
         initrc = (ROOT / 'android/device/kobo/libra_colour/init.rc').read_text()
         self.assertIn('mount devpts devpts /dev/pts', initrc)
         self.assertIn('symlink /dev/pts/ptmx /dev/ptmx', initrc)
-        self.assertLess(initrc.index('service servicemanager '), initrc.index('service healthd '))
-        self.assertIn('on property:init.svc.servicemanager=running\n    start healthd', initrc)
+        self.assertLess(initrc.index('service healthd '), initrc.index('service servicemanager '))
+        self.assertIn('on fs\n', initrc)
+        self.assertIn('    setprop ro.crypto.state unencrypted\n    trigger nonencrypted', initrc)
+        nonencrypted = initrc.split('on nonencrypted', 1)[1].split('\non ', 1)[0]
+        self.assertIn('class_start late_start', nonencrypted)
+        post_fs_data = initrc.split('on post-fs-data', 1)[1].split('\non ', 1)[0]
+        self.assertIn('load_persist_props', post_fs_data)
+        self.assertIn('setprop vold.post_fs_data_done 1', post_fs_data)
+        healthd = initrc.split('service healthd /sbin/healthd', 1)[1].split('\nservice ', 1)[0]
+        self.assertIn('class core', healthd)
+        self.assertNotIn('disabled', healthd)
+        self.assertNotIn('vold.decrypt trigger_restart_framework', initrc)
         self.assertIn('android-kitkat_api19', (ROOT / 'scripts/rootfs.py').read_text())
 
 

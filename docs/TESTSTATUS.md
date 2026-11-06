@@ -10,13 +10,13 @@ Die bereitgestellten Logs enthalten den Rootfs-Marker `android-5.0.2_api21`; sie
 
 ## Umgesetzte Änderungen
 
-1. Die KitKat-Init bindet `devpts` unter dem Android-eigenen `/dev/pts` ein und verlinkt `/dev/ptmx`, damit `logwrapper` und Subprozesse PTYs erhalten.
-2. `healthd` ist als nicht-kritischer Dienst hinter `servicemanager` angeordnet und wird erst gestartet, nachdem dessen Status `running` erreicht ist. Damit erhält es die Voraussetzung, `batteryproperties` über Binder zu registrieren.
-3. Der Build ist auf Android KitKat/API 19 festgelegt. Das API-19-SDK-Archiv ist mit der SHA-256-Prüfsumme `ca7440cade53d829a8cace857cfad9afaa174c286d1b7a5d139e73cfcfde45d7` gepinnt; Workflow, Paketnamen, Rootfs-Marker und Dokumentation wurden von den veralteten API-21/Lollipop-Angaben bereinigt.
+1. Der erste veröffentlichte Fix schob `healthd` hinter `servicemanager`; das wich von QEMUs erfolgreicher Reihenfolge ab. Der aktuelle Init startet `healthd` wieder als `core`-Dienst vor `servicemanager`.
+2. Der QEMU-Vergleich deckte eine fehlende Boot-Eventkette auf: `on fs` setzt nun `ro.crypto.state=unencrypted` und triggert `nonencrypted`; dieser Event startet `late_start`. `post-fs-data` setzt wie QEMU `vold.post_fs_data_done=1`.
+3. `devpts` bleibt für die in den Kobo-Logs sichtbaren PTY-Fehler eingebunden. Der Build ist auf Android KitKat/API 19 festgelegt; das SDK-Archiv ist mit SHA-256 `ca7440cade53d829a8cace857cfad9afaa174c286d1b7a5d139e73cfcfde45d7` gepinnt.
 
 ## Verifikation und offene Punkte
 
-Die Hosttests laufen mit **42 Testfällen: 38 erfolgreich, 4 übersprungen**; Shellsyntax, ShellCheck und `git diff --check` sind ebenfalls sauber. Das API-19-Archiv wurde heruntergeladen und die feste Prüfsumme verifiziert. Der komplette SDK-Stagingpfad fand die benötigten KitKat-Dateien, aber die native Kompilierung konnte in dieser ARM64-Sandbox nicht ausgeführt werden: Das historische NDK r10e enthält nur einen x86-64-Hostcompiler (`Exec format error`). GitHub Actions läuft auf x86-64 und muss den Build noch bestätigen.
+Nach Ergänzung der QEMU-Eventkette laufen **42 Hosttests: 38 erfolgreich, 4 übersprungen**; Bash-Syntax, ShellCheck und `git diff --check` sind sauber. Der vollständige API-19-Build war in der ARM64-Sandbox beim x86-64-Compiler des NDK r10e blockiert.
 
 Der aktuelle Satz Kobo-Logs stammt laut Rootfs-Marker von API 21 und kann die KitKat-Änderungen nicht validieren. Ein echter Libra-Colour-Boot mit API 19 ist ebenfalls noch nicht nachgewiesen. Nach Aktualisierung muss auf dem Gerät `getprop sys.boot_completed` schließlich `1` liefern; außerdem müssen `batteryproperties` im ServiceManager erscheinen und die PTY-/iptables-Fehler verschwinden.
 

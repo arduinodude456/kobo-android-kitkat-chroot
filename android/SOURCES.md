@@ -8,9 +8,9 @@ Die nativen Helfer werden mit dem offiziellen Android-NDK r10e für Android API 
 
 ## Bootkorrekturen aus Kobo-Logs
 
-Die mitgelieferten Logs zeigen zwei konkrete Fehlerklassen. Wiederholte Meldungen `logwrapper: Cannot create parent ptty` entstehen, wenn Android `/dev/pts` nur als Verzeichnis anlegt, aber `devpts` nicht einbindet. Das blockiert unter anderem die von KitKat-Netd verwendeten iptables-Aufrufe. Die angepasste Init bindet deshalb `devpts` im Android-privaten `/dev` ein und verlinkt `/dev/ptmx`.
+Der direkte Vergleich mit der bootenden QEMU-Version zeigte den ausgelassenen Framework-Trigger: QEMU setzt bei `on fs` `ro.crypto.state=unencrypted` und führt `trigger nonencrypted` aus. Das originale KitKat-Init startet darüber `late_start`; der Chroot ersetzte das Original-Init, ließ aber diesen Eventpfad weg. Der Chroot bildet den Ablauf jetzt explizit nach und setzt zusätzlich bei `post-fs-data` `vold.post_fs_data_done=1`, wie QEMUs `init.goldfish.rc`.
 
-Außerdem scheiterte `BatteryService` mit einer `NullPointerException`, weil `batteryproperties` nicht im ServiceManager registriert war; `healthd` wurde wiederholt neu gestartet. Die Init startet `healthd` nun erst, wenn `servicemanager` als laufend gemeldet wird. Das ist ein gezielter Fix für den beobachteten Startfehler, aber noch kein erfolgreicher Gerätetest. Die ersten Startlogs enthalten zusätzlich einen direkten Shell-Probe-Segfault; dieser separaten Diagnose ist kein Beleg, dass der spätere Framework-Start selbst an derselben Stelle scheitert.
+QEMU startet `healthd` innerhalb der `core`-Klasse vor der Deklaration von `servicemanager`. Die Chroot spiegelt nun diese Reihenfolge, statt `healthd` bis nach dem `servicemanager`-Property aufzuschieben. Außerdem bindet sie `devpts` ein, weil die Kobo-Logs `logwrapper: Cannot create parent ptty` zeigen. Die bereitgestellten Logs stammen allerdings vom alten API-21-Rootfs; sie verifizieren diese Korrektur für KitKat noch nicht.
 
 ## Hardwaregrenze
 

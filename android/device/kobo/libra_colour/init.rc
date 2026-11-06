@@ -105,16 +105,29 @@ on init
     setprop ro.hardware.egl android
     setprop ro.bootmode unknown
     setprop ro.factorytest 0
-    setprop ro.crypto.state unencrypted
-    setprop vold.decrypt trigger_restart_framework
     # KitKat's system_server instantiates its own SurfaceFlinger unless told not to;
     # that would collide with the surfaceflinger service below and leave no display.
     setprop system_init.startsurfaceflinger 0
     setprop debug.sf.nohwcomposer 1
     setprop persist.sys.usb.config none
 
+on fs
+    # Match the working QEMU init.goldfish.rc: the stock mount_all path normally
+    # emits this event after filesystems are ready. In the chroot, system/data
+    # are already mounted by the Kobo supervisor, so reproduce the framework trigger.
+    setprop debug.sf.nobootanimation 1
+    setprop dalvik.vm.dexopt-flags v=n,o=n
+    setprop ro.crypto.state unencrypted
+    trigger nonencrypted
+
+on nonencrypted
+    # This action was in stock init.rc, which the dedicated chroot init replaces.
+    class_start late_start
+
 on post-fs-data
     load_persist_props
+    # QEMU's working init.goldfish.rc sets this once /data is ready; no vold runs in the chroot.
+    setprop vold.post_fs_data_done 1
 
 on boot
     setprop net.tcp.buffersize.default 4096,87380,110208,4096,16384,110208
@@ -138,6 +151,11 @@ on boot
 service debuggerd /system/bin/debuggerd
     class main
 
+# QEMU's stock KitKat init starts healthd in core before servicemanager.
+# Keep this ordering: system_server must see batteryproperties during startup.
+service healthd /sbin/healthd
+    class core
+
 service servicemanager /system/bin/servicemanager
     class core
     user system
@@ -147,16 +165,6 @@ service servicemanager /system/bin/servicemanager
     onrestart restart zygote
     onrestart restart media
     onrestart restart drm
-
-# KitKat BatteryService braucht batteryproperties. healthd muss nach dem Binder-Manager starten,
-# sonst beendet sich die Registrierung und system_server stuerzt mit NPE in BatteryService ab.
-# Nicht critical: ein healthd-Fehler darf niemals den Kobo-Host neu starten.
-service healthd /sbin/healthd
-    class core
-    disabled
-
-on property:init.svc.servicemanager=running
-    start healthd
 
 service surfaceflinger /system/bin/surfaceflinger
     class main
