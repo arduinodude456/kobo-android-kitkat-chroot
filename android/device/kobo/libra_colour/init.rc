@@ -66,6 +66,36 @@ on init
     chmod 0666 /dev/binder
     chmod 0666 /dev/ashmem
     chmod 0666 /dev/alarm
+    # ---- aus dem Original-init.rc (4.4.4) uebernommen, soweit sie nur den Chroot betreffen ----
+    # Nicht uebernommen (wuerden den Kobo-Host veraendern): ueventd, vold, mount-Aktionen (cgroups, tmpfs),
+    # write/chown auf /proc, /sys, /proc/sys, hostname/domainname/ifup, powerctl, setcon, console, adbd.
+    sysclktz 0
+    symlink /system/vendor /vendor
+    mkdir /acct 0755 root root
+    mkdir /config 0500 root root
+    mkdir /mnt/shell 0700 shell shell
+    mkdir /mnt/media_rw 0700 media_rw media_rw
+    mkdir /mnt/secure 0700 root root
+    mkdir /mnt/secure/staging 0700 root root
+    mkdir /mnt/secure/asec 0700 root root
+    mkdir /dev/fscklogs 0770 root system
+    mkdir /cache/recovery 0770 system cache
+    mkdir /cache/lost+found 0770 root root
+    mkdir /data/lost+found 0770 root root
+    mkdir /data/dontpanic 0750 root log
+    mkdir /data/misc/adb 02750 system shell
+    mkdir /data/misc/bluedroid 0770 bluetooth net_bt_stack
+    mkdir /data/misc/bluetooth 0770 system system
+    mkdir /data/misc/radio 0770 system radio
+    mkdir /data/misc/sms 0770 system radio
+    mkdir /data/misc/zoneinfo 0775 system system
+    mkdir /data/misc/vpn 0770 system vpn
+    mkdir /data/misc/wifi 0770 wifi wifi
+    mkdir /data/ssh 0750 root shell
+    mkdir /data/ssh/empty 0700 root root
+    symlink /data/data/com.android.shell/files/bugreports /data/bugreports
+    # RLIMIT_NICE (13) wie im Original: sonst "binder: RLIMIT_NICE not set" fuer jeden Binder-Thread
+    setrlimit 13 40 40
     setprop ro.hardware kobo_libra_colour
     setprop ro.kernel.qemu 1
     setprop ro.kernel.qemu.gles 0
@@ -82,6 +112,20 @@ on init
 
 on post-fs-data
     load_persist_props
+
+on boot
+    setprop net.tcp.buffersize.default 4096,87380,110208,4096,16384,110208
+    setprop net.tcp.buffersize.wifi    524288,1048576,2097152,262144,524288,1048576
+    setprop net.tcp.buffersize.lte     524288,1048576,2097152,262144,524288,1048576
+    setprop net.tcp.buffersize.umts    4094,87380,110208,4096,16384,110208
+    setprop net.tcp.buffersize.hspa    4094,87380,262144,4096,16384,262144
+    setprop net.tcp.buffersize.hsupa   4094,87380,262144,4096,16384,262144
+    setprop net.tcp.buffersize.hsdpa   4094,87380,262144,4096,16384,262144
+    setprop net.tcp.buffersize.hspap   4094,87380,1220608,4096,16384,1220608
+    setprop net.tcp.buffersize.edge    4093,26280,35040,4096,16384,35040
+    setprop net.tcp.buffersize.gprs    4092,8760,11680,4096,8760,11680
+    setprop net.tcp.buffersize.evdo    4094,87380,262144,4096,16384,262144
+    setprop net.tcp.default_init_rwnd 60
 
 on boot
     class_start core
@@ -107,6 +151,7 @@ service servicemanager /system/bin/servicemanager
     onrestart restart surfaceflinger
     onrestart restart zygote
     onrestart restart media
+    onrestart restart drm
 
 service surfaceflinger /system/bin/surfaceflinger
     class main
@@ -139,6 +184,13 @@ service keystore /system/bin/keystore /data/misc/keystore
 service zygote /system/bin/app_process -Xzygote /system/bin --zygote --start-system-server
     class main
     socket zygote stream 0660 root system
+    onrestart restart media
+    onrestart restart netd
+
+service drm /system/bin/drmserver
+    class main
+    user drm
+    group drm system inet drmrpc
 
 # No critical-service reboot actions and no sys.powerctl trigger. Container
 # lifecycle belongs to the Kobo supervisor, not Android's global reboot API.
