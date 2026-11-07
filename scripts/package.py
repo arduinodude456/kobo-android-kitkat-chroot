@@ -59,7 +59,7 @@ def package(root, build, product, dist):
     validate_compressed_image(build / 'rootfs.img.gz', size)
     for helper in ('kobo-vnc', 'kobo-container'):
         arm_elf(require(product / 'system/bin' / helper), static=True)
-    required_runtime = ('android.sh', 'install.sh', 'config', 'ime-fix.sh')
+    required_runtime = ('android.sh', 'install.sh', 'config')
     for name in required_runtime:
         require(root / 'runtime' / name)
     require(root / 'lua/appdock_android.lua')
@@ -79,6 +79,9 @@ def package(root, build, product, dist):
         copy_file(build / name, android / name)
     for name in required_runtime:
         copy_file(root / 'runtime' / name, android / name, executable=name.endswith('.sh'))
+    ime_fix = root / 'runtime/ime-fix.sh'
+    if ime_fix.is_file():
+        copy_file(ime_fix, android / 'ime-fix.sh', executable=True)
     for helper in ('kobo-vnc', 'kobo-container'):
         copy_file(product / 'system/bin' / helper, android / 'bin' / helper, executable=True)
     probe = product / 'system/bin/kobo-probe'
