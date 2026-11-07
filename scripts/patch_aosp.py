@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 MARKER = "KOBO_CHROOT_ANDROID_444_R2_V1"
-PRUNE = "adb adbd bootanimation healthd init.rc reboot vold vdc netd ndc dhcpcd dhcpcd-run-hooks dnsmasq mtpd pppd racoon sdcard ip-up-vpn Home sensorservice".split()
+PRUNE = "adb adbd healthd init.rc reboot vold vdc netd ndc dhcpcd dhcpcd-run-hooks dnsmasq mtpd pppd racoon sdcard ip-up-vpn Home sensorservice".split()
 
 
 def replace_once(text, old, new):

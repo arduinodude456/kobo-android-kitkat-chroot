@@ -115,7 +115,7 @@ on fs
     # Match the working QEMU init.goldfish.rc: the stock mount_all path normally
     # emits this event after filesystems are ready. In the chroot, system/data
     # are already mounted by the Kobo supervisor, so reproduce the framework trigger.
-    setprop debug.sf.nobootanimation 1
+    setprop debug.sf.nobootanimation 0
     setprop dalvik.vm.dexopt-flags v=n,o=n
     setprop ro.crypto.state unencrypted
     trigger nonencrypted
@@ -211,6 +211,16 @@ service zygote /system/bin/app_process -Xzygote /system/bin --zygote --start-sys
     socket zygote stream 0660 root system
     onrestart restart media
     onrestart restart netd
+
+# Boot-Animation (zum Test wieder aktiv): SurfaceFlinger startet sie per ctl.start bootanim, solange
+# debug.sf.nobootanimation=0; sie endet, wenn system_server service.bootanim.exit=1 setzt.
+# Sichtbares Lebenszeichen der Grafikkette (SurfaceFlinger -> fb.bin -> kobo-vnc).
+service bootanim /system/bin/bootanimation
+    class main
+    user graphics
+    group graphics audio
+    disabled
+    oneshot
 
 service drm /system/bin/drmserver
     class main

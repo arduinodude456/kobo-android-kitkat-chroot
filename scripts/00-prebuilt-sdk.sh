@@ -118,7 +118,7 @@ values = {
     'dalvik.vm.execution-mode': 'int:jit',
     'ro.kernel.android.checkjni': '0',
     'ro.setupwizard.mode': 'DISABLED',
-    'debug.sf.nobootanimation': '1',
+    'debug.sf.nobootanimation': '0',
 }
 lines = p.read_text().splitlines()
 seen = set()
