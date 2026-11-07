@@ -68,6 +68,13 @@ local function u32(s, i) local a,b,c,d=s:byte(i,i+3); return ((a*256+b)*256+c)*2
 local function p16(v) return string.char(math.floor(v/256)%256, v%256) end
 local function p32(v) return p16(math.floor(v/65536)%65536)..p16(v%65536) end
 local RFB = {}; RFB.__index = RFB
+-- 2x2-Bayer-Matrix fuer 1-Bit-Dithering je Farbkanal. Dadurch entstehen
+-- ausschliesslich die acht Farben (RGB jeweils 0 oder 255).
+local BAYER2={{0,2},{3,1}}
+local function dither_channel(value,x,y)
+    local threshold=(BAYER2[y%2+1][x%2+1]+0.5)*64
+    return value>=threshold and 255 or 0
+end
 function RFB:send(s)
     -- Only tiny control packets. A blocked/closed local peer is an error, not a UI hang.
     self.sock:settimeout(0.2)
@@ -210,7 +217,30 @@ function View:init()
 end
 function View:paintTo(bb,x,y)
     bb:paintRect(x,y,self.dimen.w,self.dimen.h,Blitbuffer.COLOR_WHITE)
-    if self.rfb then bb:blitFrom(self.rfb.bb,x+self.ox,y+self.oy,0,0,self.rfb.w,self.rfb.h)
+    if self.rfb then
+        -- Das Android-Bild nimmt die gesamte Fläche oberhalb der Buttons ein.
+        -- blitFrom() skaliert nicht; deshalb wird hier mit nearest-neighbour
+        -- direkt zwischen den beiden RGB32-Blitbuffer kopiert und dabei auf
+        -- die acht erlaubten Farben gedithert.
+        local src=self.rfb.bb
+        local src_stride=tonumber(src.stride) or self.rfb.w*4
+        local dst_stride=tonumber(bb.stride) or self.dimen.w*4
+        local src_base=ffi.cast("const uint8_t*",src.data)
+        local dst_base=ffi.cast("uint8_t*",bb.data)
+        for dy=0,self.draw_h-1 do
+            local sy=math.min(self.rfb.h-1,math.floor(dy*self.rfb.h/self.draw_h))
+            local srow=src_base+sy*src_stride
+            local drow=dst_base+(y+self.oy+dy)*dst_stride+(x+self.ox)*4
+            for dx=0,self.draw_w-1 do
+                local sx=math.min(self.rfb.w-1,math.floor(dx*self.rfb.w/self.draw_w))
+                local sp=srow+sx*4
+                local dp=drow+dx*4
+                dp[0]=dither_channel(sp[0],dx,dy)
+                dp[1]=dither_channel(sp[1],dx,dy)
+                dp[2]=dither_channel(sp[2],dx,dy)
+                dp[3]=255
+            end
+        end
     else self.status:paintTo(bb,x+20,y+40) end
     for _,b in ipairs(self.buttons) do
         local r=b.rect; bb:paintRect(x+r.x,y+r.y,r.w-2,r.h,Blitbuffer.COLOR_BLACK)
@@ -227,16 +257,29 @@ function View:pollAndroid()
     if not self.rfb then
         local rfb=RFB.connect()
         if rfb then
-            if rfb.w>self.dimen.w or rfb.h>self.dimen.h-100 then rfb:close(); self:fail("600×800-Ansicht passt nicht. Bitte Hochformat verwenden."); return end
-            self.rfb=rfb; self.ox=math.floor((self.dimen.w-rfb.w)/2); self.oy=math.floor((self.dimen.h-100-rfb.h)/2)
+            self.rfb=rfb
+            self.draw_w=self.dimen.w
+            self.draw_h=self.dimen.h-90
+            self.ox=0; self.oy=0
+            self.next_full_refresh=socket.gettime()+30
             UIManager:setDirty(self,"full")
         elseif socket.gettime()>self.deadline then self:fail("Android konnte nicht gestartet werden."); return end
     else
         local ok,changed=pcall(self.rfb.poll,self.rfb)
         if not ok then self:fail(tostring(changed)); return end
-        if changed then UIManager:setDirty(self,"ui",Geom:new{x=self.ox,y=self.oy,w=self.rfb.w,h=self.rfb.h}) end
+        local now=socket.gettime()
+        local mode=changed and "fast" or nil
+        if now >= (self.next_full_refresh or now+30) then
+            mode="full"
+            self.next_full_refresh=now+30
+        end
+        if mode=="full" then
+            UIManager:setDirty(self,"full")
+        elseif mode=="fast" then
+            UIManager:setDirty(self,"fast",Geom:new{x=self.ox,y=self.oy,w=self.draw_w,h=self.draw_h})
+        end
     end
-    UIManager:scheduleIn(0.15,self.tick)
+    UIManager:scheduleIn(0.05,self.tick)
 end
 function View:pulse(key)
     if not self.rfb then return end
@@ -283,8 +326,11 @@ function View:onAndroidGesture(_,ges)
         end
     end
     if not self.rfb then return true end
-    local x,y=pos.x-self.ox,pos.y-self.oy
-    local inside=x>=0 and y>=0 and x<self.rfb.w and y<self.rfb.h
+    local sx,sy=pos.x-self.ox,pos.y-self.oy
+    local inside=sx>=0 and sy>=0 and sx<self.draw_w and sy<self.draw_h
+    -- Die sichtbare, skalierte Position wird in die native Android-Auflösung
+    -- zurückgerechnet, damit Touch trotz Vollbilddarstellung korrekt bleibt.
+    local x,y=sx*self.rfb.w/self.draw_w,sy*self.rfb.h/self.draw_h
     local now=socket.gettime()
     local function pointer(down,px,py)
         local ok,err=pcall(self.rfb.pointer,self.rfb,px,py,down)

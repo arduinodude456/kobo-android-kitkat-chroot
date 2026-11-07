@@ -223,8 +223,9 @@ int ioctl(int fd, unsigned long request, ...)
     case FBIO_WAITFORVSYNC:
         if (!arg) break;
         if (*(uint32_t *)arg != 0) { errno = EINVAL; return -1; }
-        /* Fake display: no hardware vblank; yielding prevents tight producers. */
-        usleep(16000); return 0;
+        /* Fake display: no hardware vblank. Keep only a 1 ms yield so the
+         * emulated display is not artificially capped at about 62.5 Hz. */
+        usleep(1000); return 0;
     case FBIOBLANK:
         if ((uintptr_t)arg <= FB_BLANK_POWERDOWN) return 0;
         errno = EINVAL; return -1;

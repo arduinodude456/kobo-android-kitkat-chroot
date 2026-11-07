@@ -196,7 +196,9 @@ static int serve_client(int fd,struct kobo_fb *fb,struct kobo_input *input)
     if(!last || !row) { free(last); free(row); return -1; }
     while(!stopping) {
         struct pollfd p; int n; p.fd=fd; p.events=POLLIN; p.revents=0;
-        n=poll(&p,1,50);
+        /* The client issues framebuffer requests frequently; do not add a
+         * fixed 50 ms latency before checking for the next one. */
+        n=poll(&p,1,1);
         if(n<0) { if(errno==EINTR)continue; break; }
         if(n>0) {
             if(!(p.revents&POLLIN))break;
