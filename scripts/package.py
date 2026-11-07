@@ -104,6 +104,13 @@ def package(root, build, product, dist):
     copy_file(root / 'runtime/kobo-container.c', android / 'src/runtime/kobo-container.c')
     shutil.copytree(root / 'android/device', android / 'src/android/device')
     shutil.copytree(root / 'scripts', android / 'src/scripts', ignore=shutil.ignore_patterns('__pycache__'))
+    # Ship bundled APKs separately as well. The runtime copies them into the
+    # mounted system partition, so an existing rootfs.img can receive app
+    # updates without requiring a complete image rebuild.
+    prebuilt = root / 'android/device/kobo/libra_colour/prebuilt'
+    if prebuilt.is_dir():
+        for apk in sorted(prebuilt.glob('*.apk')):
+            copy_file(apk, android / 'apps' / apk.name)
     files = []
     for path in sorted(pkg.rglob('*')):
         if path.is_file():

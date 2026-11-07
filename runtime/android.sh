@@ -5,7 +5,9 @@ set -eu
 BASE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 RUN="$BASE/run"
 ROOTFS="$RUN/rootfs"
-PUBLIC_SHARED="$BASE/shared"
+# BASE is normally /mnt/onboard/.adds/android; keep user files in a visible
+# Kobo directory instead of hiding them below .adds.
+PUBLIC_SHARED="$BASE/../../android-shared"
 CONFIG="$BASE/config"
 # shellcheck source=/dev/null
 [ ! -f "$CONFIG" ] || . "$CONFIG"
@@ -291,6 +293,18 @@ cleanup() {
     rm -f "$RUN/runner.pid" "$RUN/container.pid" "$RUN/vnc.pid" "$RUN/ready"
     if [ "$unmount_failed" = 0 ]; then rmdir "$RUN/lock" 2>/dev/null || true; fi
 }
+install_bundled_apps() {
+    apps="$BASE/apps"
+    [ -d "$apps" ] || return 0
+    mkdir -p "$ROOTFS/system/app"
+    for apk in "$apps"/*.apk; do
+        [ -f "$apk" ] || continue
+        target="$ROOTFS/system/app/$(basename "$apk")"
+        cp "$apk" "$target"
+        chmod 0644 "$target"
+        echo "Bundled APK installiert: $(basename "$apk")"
+    done
+}
 run() {
     root_required
     mkdir "$RUN/lock" 2>/dev/null || fail 'Schon gestartet oder alte Mounts vorhanden; status/recover prüfen.'
@@ -304,6 +318,7 @@ run() {
     mounted "$ROOTFS" && fail 'Rootfs ist bereits gemountet.'
     mount -t ext4 -o loop,noatime,nosuid "$BASE/rootfs.img" "$ROOTFS"
     [ -f "$ROOTFS/kobo-chroot" ] && [ "$(cat "$ROOTFS/kobo-chroot")" = 'android-kitkat_api19' ] || fail 'Falsches Rootfs: KitKat/API-19-Image erforderlich. Altes rootfs.img sichern, entfernen und neu installieren.'
+    install_bundled_apps
     patch_init_rc
     # Statisches /sbin/healthd ignoriert LD_PRELOAD (Binder-Shim) -> batteryproperties fehlt -> Boot-Schleife.
     grep -aq '/system/bin/linker' "$ROOTFS/sbin/healthd" 2>/dev/null || fail 'Rootfs veraltet: /sbin/healthd ist statisch (kein kobo-healthd). Neues Paket installieren.'
@@ -343,7 +358,7 @@ run() {
     # Android through /sdcard and /storage/emulated/0.
     mkdir -p "$PUBLIC_SHARED" "$ROOTFS/storage/emulated/0"
     chmod 0777 "$PUBLIC_SHARED"
-    mount -o bind "$PUBLIC_SHARED" "$ROOTFS/storage/emulated/0"
+    mount -o bind "$PUBLIC_SHARED" "$ROOTFS/storage/emulated/0" || fail "Gemeinsamer Speicher konnte nicht gemountet werden: $PUBLIC_SHARED"
     if [ "${KOBO_PROBE:-0}" = 1 ]; then
         # Harmloser Test: nur ein Android-Shell-Befehl im Chroot, KEIN init, kein zygote.
         echo "PROBE: chroot + /system/bin/sh (ohne init)"
