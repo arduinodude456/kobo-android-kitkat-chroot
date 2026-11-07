@@ -41,4 +41,13 @@ local ptr,_,ps=client()
 ptr:pointer(-10,99,true)
 check(ps.sent[1]=="\5\1\0\0\0\1","pointer clamped")
 check(module._test.quote("a'b")=="'a'\\''b'","shell argument escaped")
+-- Touch-Ende: jede Geste, die eine Beruehrung beendet, muss den Zeiger loslassen (sonst BTN_TOUCH haengt).
+local pa=module._test.pointer_action
+check(pa("touch",false,true)=="down" and pa("touch",false,false)==nil,"touch presses only inside Android view")
+check(pa("pan",true,false)=="move" and pa("pan",false,false)==nil,"pan continues an active press")
+for _,k in ipairs({"release","pan_release","tap","hold_release","swipe","double_tap"}) do
+    check(pa(k,true,true)=="up","gesture "..k.." releases an active press")
+end
+check(pa("tap",false,true)=="tap" and pa("tap",false,false)==nil,"tap without prior touch is synthesized only inside")
+check(pa("hold",true,true)==nil,"hold keeps the press")
 print("Lua RFB: "..count.." assertions passed")

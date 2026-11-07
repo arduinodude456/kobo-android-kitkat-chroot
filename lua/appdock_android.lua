@@ -173,11 +173,24 @@ function RFB:poll()
     end
     return changed
 end
+-- KOReader liefert fuer das Ende einer Beruehrung je nach Geste "tap", "swipe", "hold_release",
+-- "pan_release" oder "double_tap" (eine rohe Geste "release" gibt es nicht zuverlaessig). Wer nur auf
+-- "release"/"pan_release" lauscht, laesst BTN_TOUCH in Android fuer immer gedrueckt: Touch wirkt tot.
+local END_GESTURES={release=true,pan_release=true,tap=true,hold_release=true,swipe=true,double_tap=true}
+local function pointer_action(kind,pointer_down,inside)
+    if kind=="touch" then return inside and "down" or nil
+    elseif kind=="pan" then return (inside or pointer_down) and "move" or nil
+    elseif END_GESTURES[kind] then
+        if pointer_down then return "up" end
+        if kind=="tap" and inside then return "tap" end
+    end
+    return nil
+end
 local View=InputContainer:extend{name="KoboAndroid",covers_fullscreen=true}
 function View:init()
     self.dimen=Geom:new{x=0,y=0,w=Screen:getWidth(),h=Screen:getHeight()}
     self.ges_events={}
-    for _,g in ipairs({"touch","release","tap","pan","pan_release"}) do
+    for _,g in ipairs({"touch","release","tap","pan","pan_release","hold","hold_release","swipe","double_tap"}) do
         self.ges_events[g]={GestureRange:new{ges=g,range=self.dimen},event="AndroidGesture"}
     end
     self.key_events={AndroidBack={{"Back"},event="AndroidBack"}}
@@ -239,6 +252,21 @@ end
 function View:showLog()
     UIManager:show(TextViewer:new{title="Android-Log",text=diagnostics(),width=self.dimen.w,height=self.dimen.h})
 end
+-- Sicherheitsnetz: geht jedes Ende-Ereignis verloren, wird die Beruehrung nach 6 s trotzdem geloest.
+function View:disarmWatchdog()
+    if self.watchdog then UIManager:unschedule(self.watchdog); self.watchdog=nil end
+end
+function View:armWatchdog()
+    self:disarmWatchdog()
+    self.watchdog=function()
+        self.watchdog=nil
+        if self.pointer_down and not self.closed and self.rfb then
+            self.pointer_down=false
+            pcall(self.rfb.pointer,self.rfb,self.px or 0,self.py or 0,false)
+        end
+    end
+    UIManager:scheduleIn(6,self.watchdog)
+end
 function View:onAndroidBack() self:pulse(0xff1b); return true end
 function View:onAndroidGesture(_,ges)
     if self.closed then return true end
@@ -258,18 +286,19 @@ function View:onAndroidGesture(_,ges)
     local x,y=pos.x-self.ox,pos.y-self.oy
     local inside=x>=0 and y>=0 and x<self.rfb.w and y<self.rfb.h
     local now=socket.gettime()
-    local function pointer(down)
-        local ok,err=pcall(self.rfb.pointer,self.rfb,x,y,down)
+    local function pointer(down,px,py)
+        local ok,err=pcall(self.rfb.pointer,self.rfb,px,py,down)
         if not ok then self:fail(tostring(err)) end
     end
-    if kind=="touch" and inside then
-        self.pointer_down=true; self.last_touch=now; pointer(true)
-    elseif kind=="pan" and (inside or self.pointer_down) then
-        self.pointer_down=true; self.last_touch=now; pointer(true)
-    elseif kind=="release" or kind=="pan_release" then
-        if self.pointer_down then pointer(false); self.pointer_down=false end
-    elseif kind=="tap" and inside and now-(self.last_touch or 0)>0.6 then
-        pointer(true)
+    local action=pointer_action(kind,self.pointer_down,inside)
+    if action=="down" or action=="move" then
+        self.pointer_down=true; self.px,self.py=x,y; pointer(true,x,y); self:armWatchdog()
+    elseif action=="up" then
+        self.pointer_down=false; self:disarmWatchdog()
+        pointer(false,self.px or x,self.py or y)
+    elseif action=="tap" then
+        -- Beruehrung ohne vorheriges "touch" (z.B. verlorenes Ereignis): Tipp nachbilden.
+        pointer(true,x,y)
         self.tap_release=function()
             if not self.closed and self.rfb then pcall(self.rfb.pointer,self.rfb,x,y,false) end
         end
@@ -281,6 +310,7 @@ function View:onCloseWidget()
     self.closed=true
     if self.tick then UIManager:unschedule(self.tick) end
     if self.tap_release then UIManager:unschedule(self.tap_release) end
+    self:disarmWatchdog()
     for cb in pairs(self.key_timers or {}) do UIManager:unschedule(cb) end
     if self.rfb then self.rfb:close(); self.rfb=nil end
     -- Stop is deliberately asynchronous: no wait/sleep in the KOReader UI thread.
@@ -299,5 +329,5 @@ function M.open()
     if not ok then UIManager:show(InfoMessage:new{text=err}); return false end
     UIManager:show(View:new{}); return true
 end
-M._test={RFB=RFB,quote=quote,p16=p16,p32=p32}
+M._test={RFB=RFB,quote=quote,p16=p16,p32=p32,pointer_action=pointer_action}
 return M
