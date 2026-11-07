@@ -15,7 +15,9 @@ PRODUCT_PACKAGES += \
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/init.rc:root/init.rc \
     $(LOCAL_PATH)/egl.cfg:system/lib/egl/egl.cfg \
-    $(LOCAL_PATH)/kobo.idc:system/usr/idc/Kobo_Android_Touch.idc
+    $(LOCAL_PATH)/kobo.idc:system/usr/idc/Kobo_Android_Touch.idc \
+    $(LOCAL_PATH)/prebuilt/AmazeFileManager-3.8.apk:system/app/AmazeFileManager.apk \
+    $(LOCAL_PATH)/prebuilt/Editor-1.71.apk:system/app/Editor.apk
 DEVICE_PACKAGE_OVERLAYS := $(LOCAL_PATH)/overlay
 PRODUCT_AAPT_CONFIG := normal mdpi
 PRODUCT_AAPT_PREF_CONFIG := mdpi

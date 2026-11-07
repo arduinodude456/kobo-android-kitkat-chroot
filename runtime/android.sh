@@ -5,6 +5,7 @@ set -eu
 BASE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 RUN="$BASE/run"
 ROOTFS="$RUN/rootfs"
+PUBLIC_SHARED="$BASE/shared"
 CONFIG="$BASE/config"
 # shellcheck source=/dev/null
 [ ! -f "$CONFIG" ] || . "$CONFIG"
@@ -338,6 +339,11 @@ run() {
     chmod 0600 "$ROOTFS/dev/kmsg"
     mount -t tmpfs -o size=4m,mode=0755,nosuid,nodev tmpfs "$RUN/shared"
     mount -o bind "$RUN/shared" "$ROOTFS/dev/kobo"
+    # Persistent shared storage: visible on the Kobo as $BASE/shared and in
+    # Android through /sdcard and /storage/emulated/0.
+    mkdir -p "$PUBLIC_SHARED" "$ROOTFS/storage/emulated/0"
+    chmod 0777 "$PUBLIC_SHARED"
+    mount -o bind "$PUBLIC_SHARED" "$ROOTFS/storage/emulated/0"
     if [ "${KOBO_PROBE:-0}" = 1 ]; then
         # Harmloser Test: nur ein Android-Shell-Befehl im Chroot, KEIN init, kein zygote.
         echo "PROBE: chroot + /system/bin/sh (ohne init)"
