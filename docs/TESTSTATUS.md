@@ -28,3 +28,6 @@ Hosttests starten Android nicht und beweisen keinen Geräteboot. Kein Firmware- 
 
 ## Ursache der verbleibenden NPE (BatteryService.java:167) – gefunden
 KitKat 4.4.x ruft in `BatteryService.<init>` `ServiceManager.getService("batterypropreg")` auf (verifiziert gegen android-4.4.4_r2). `kobo-healthd` registrierte nur `"batteryproperties"` (Name ab Android 5). `service check batteryproperties` meldete deshalb „found“, das Framework bekam aber `null` → NPE bei `registerListener`. Fix: `kobo-healthd` registriert jetzt beide Namen. Noch nicht auf Gerät verifiziert.
+
+## Ursache von „Power off / Shutting down…“ direkt nach dem Boot – gefunden
+`BatteryProperties` hat in KitKat 4.4.2 und 4.4.4 zwei Felder mehr als zuvor angenommen: nach `batteryVoltage` folgen `batteryCurrentNow` und `batteryChargeCounter`, erst dann `batteryTemperature` (verifiziert gegen android-4.4.2_r1 und android-4.4.4_r2). `kobo-healthd` ließ sie aus. Android las dadurch als Temperatur die Zeichen „Li“ des Technologie-Strings (0x0069004C = 6881356) und löste in `BatteryService.shutdownIfOverTempLocked` `ACTION_REQUEST_SHUTDOWN` (`confirm=false`) aus. Fix: beide Felder mit 0 senden; Host-Test prüft die Reihenfolge. Noch nicht auf Gerät verifiziert.

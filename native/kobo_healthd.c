@@ -68,6 +68,8 @@ size_t kh_build_props(struct kh_buf *b)
     kh_i32(b, 1);                 /* present */
     kh_i32(b, 100);               /* Level */
     kh_i32(b, 4200);              /* mV */
+    kh_i32(b, 0);                 /* batteryCurrentNow (KitKat 4.4.x: Pflichtfeld vor Temperatur!) */
+    kh_i32(b, 0);                 /* batteryChargeCounter (ebenso) */
     kh_i32(b, 250);               /* 0.1 Grad C */
     kh_str16(b, "Li-ion");
     return b->len;
