@@ -75,6 +75,7 @@ local function dither_channel(value,x,y)
     local threshold=(BAYER2[y%2+1][x%2+1]+0.5)*64
     return value>=threshold and 255 or 0
 end
+local DITHER_THRESHOLDS={32,160,224,96}
 function RFB:send(s)
     -- Only tiny control packets. A blocked/closed local peer is an error, not a UI hang.
     self.sock:settimeout(0.2)
@@ -227,17 +228,20 @@ function View:paintTo(bb,x,y)
         local dst_stride=tonumber(bb.stride) or self.dimen.w*4
         local src_base=ffi.cast("const uint8_t*",src.data)
         local dst_base=ffi.cast("uint8_t*",bb.data)
+        local xmap=self.xmap; local ymap=self.ymap
+        local thresholds=DITHER_THRESHOLDS
         for dy=0,self.draw_h-1 do
-            local sy=math.min(self.rfb.h-1,math.floor(dy*self.rfb.h/self.draw_h))
+            local sy=ymap[dy+1]
             local srow=src_base+sy*src_stride
             local drow=dst_base+(y+self.oy+dy)*dst_stride+(x+self.ox)*4
             for dx=0,self.draw_w-1 do
-                local sx=math.min(self.rfb.w-1,math.floor(dx*self.rfb.w/self.draw_w))
+                local sx=xmap[dx+1]
                 local sp=srow+sx*4
                 local dp=drow+dx*4
-                dp[0]=dither_channel(sp[0],dx,dy)
-                dp[1]=dither_channel(sp[1],dx,dy)
-                dp[2]=dither_channel(sp[2],dx,dy)
+                local threshold=thresholds[(dy%2)*2+(dx%2)+1]
+                dp[0]=sp[0]>=threshold and 255 or 0
+                dp[1]=sp[1]>=threshold and 255 or 0
+                dp[2]=sp[2]>=threshold and 255 or 0
                 dp[3]=255
             end
         end
@@ -261,6 +265,13 @@ function View:pollAndroid()
             self.draw_w=self.dimen.w
             self.draw_h=self.dimen.h-90
             self.ox=0; self.oy=0
+            self.xmap={}; self.ymap={}
+            for dx=0,self.draw_w-1 do
+                self.xmap[dx+1]=math.min(rfb.w-1,math.floor(dx*rfb.w/self.draw_w))
+            end
+            for dy=0,self.draw_h-1 do
+                self.ymap[dy+1]=math.min(rfb.h-1,math.floor(dy*rfb.h/self.draw_h))
+            end
             self.next_full_refresh=socket.gettime()+30
             UIManager:setDirty(self,"full")
         elseif socket.gettime()>self.deadline then self:fail("Android konnte nicht gestartet werden."); return end
