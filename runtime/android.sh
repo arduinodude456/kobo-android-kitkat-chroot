@@ -249,6 +249,21 @@ bootwatch() {
         if [ -n "$t" ]; then head -n 60 "$ROOTFS/data/tombstones/$t" > "$BASE/tombstone.txt" 2>/dev/null; fi
         [ "$(gp sys.boot_completed)" = 1 ] && { echo "BOOT FERTIG nach ${i}0s" >> "$w"; break; }
     done
+    # Eingabe-Diagnose (Touch/Tasten) erst nach dem Boot, wenn InputReader die Geraete kennt.
+    if [ "$(gp sys.boot_completed)" = 1 ]; then
+        sleep 25
+        {
+            echo "--- Host /proc/bus/input/devices (kobo-vnc):"
+            grep -A8 'kobo-vnc' /proc/bus/input/devices 2>&1
+            echo "--- ls -l rootfs/dev/input:"; ls -l "$ROOTFS/dev/input" 2>&1
+            echo "--- getevent -p (im Android-Chroot):"
+            "$ENVB" -i PATH=/system/bin LD_PRELOAD=/system/lib/libkobofb.so "$CHROOTB" "$ROOTFS" /system/bin/getevent -p 2>&1 | head -n 80
+            echo "--- dumpsys input (Geraete, Display-Viewport):"
+            "$ENVB" -i PATH=/system/bin LD_PRELOAD=/system/lib/libkobofb.so "$CHROOTB" "$ROOTFS" /system/bin/dumpsys input 2>&1 | head -n 120
+            echo "--- logcat Input*:"
+            grep -E 'InputReader|InputDispatcher|EventHub|InputManager' "$ROOTFS/data/local/tmp/android.log" 2>&1 | tail -n 40
+        } > "$BASE/input.txt" 2>&1
+    fi
 }
 cleanup() {
     trap - EXIT INT TERM HUP
