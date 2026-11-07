@@ -152,11 +152,11 @@ static void ack_ref(uint32_t cmd, const uint8_t *src, struct kh_buf *w)
     kb_u_ptr_cookie pc; memcpy(&pc, src, sizeof pc);
     put_cmd(w, cmd == KB_U_BR_INCREFS ? KB_U_BC_INCREFS_DONE : KB_U_BC_ACQUIRE_DONE, &pc, sizeof pc);
 }
-static int add_service(void)
+static int add_service(const char *svc)
 {
     uint8_t pb[256], wb[256], rb[512], ab[64]; struct kh_buf p, w, a; uint32_t off; size_t rc, pos;
     p.p = pb; p.cap = sizeof pb; p.len = 0; p.overflow = 0;
-    kh_build_add_service(&p, "batteryproperties", local_token, &off);
+    kh_build_add_service(&p, svc, local_token, &off);
     w.p = wb; w.cap = sizeof wb; w.len = 0; w.overflow = 0;
     put_cmd(&w, KB_BC_ENTER_LOOPER, NULL, 0);
     put_tr(&w, KB_U_BC_TRANSACTION, 0, KH_ADD_SERVICE, 0, pb, p.len, &off, 1);
@@ -242,13 +242,21 @@ int main(void)
     if (ioctl(fd, (int)KB_VERSION, &ver) < 0 || ver != KB_PROTOCOL_USER) { klog("binder version %d (erwartet %d): LD_PRELOAD fehlt?", (int)ver, (int)KB_PROTOCOL_USER); return 1; }
     map = mmap(NULL, 128 * 1024, PROT_READ, MAP_PRIVATE, fd, 0);
     if (map == MAP_FAILED) { logmsg("mmap failed"); return 1; }
-    for (tries = 0; tries < 600; tries++) {   /* servicemanager darf spaeter starten */
-        if (add_service() == 0) break;
-        klog("addService attempt %d failed (%d)", tries + 1, 0);
-        { struct timespec ts = { 1, 0 }; nanosleep(&ts, NULL); }
+    /* KitKat (4.4.x) BatteryService sucht "batterypropreg"; "batteryproperties" gilt erst ab Android 5.
+     * Beide Namen auf denselben Knoten registrieren. */
+    {
+        static const char *const names[2] = { "batterypropreg", "batteryproperties" };
+        int i;
+        for (i = 0; i < 2; i++) {
+            for (tries = 0; tries < 600; tries++) {   /* servicemanager darf spaeter starten */
+                if (add_service(names[i]) == 0) break;
+                klog("addService attempt %d failed (%d)", tries + 1, 0);
+                { struct timespec ts = { 1, 0 }; nanosleep(&ts, NULL); }
+            }
+            if (tries >= 600) { logmsg("addService failed"); return 1; }
+        }
     }
-    if (tries >= 600) { logmsg("addService batteryproperties failed"); return 1; }
-    logmsg("batteryproperties registered");
+    logmsg("batterypropreg + batteryproperties registered");
     /* init.rc startet class main (zygote, surfaceflinger, ...) erst jetzt: system_server braucht den Dienst sofort. */
     if (system("/system/bin/setprop kobo.healthd.ready 1") != 0) logmsg("setprop kobo.healthd.ready failed");
     serve();

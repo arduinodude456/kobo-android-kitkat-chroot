@@ -237,6 +237,8 @@ bootwatch() {
             echo "init.svc.healthd=$(gp init.svc.healthd)"
             echo "--- ps (Android-Prozesse):"
             for d in /proc/[0-9]*; do [ "$(readlink "$d/root" 2>/dev/null)" = "$ROOTFS" ] && echo "${d#/proc/} $(cat "$d/comm" 2>/dev/null)"; done
+            echo "--- service check batterypropreg (KitKat-Name):"
+            "$ENVB" -i PATH=/system/bin LD_PRELOAD=/system/lib/libkobofb.so "$CHROOTB" "$ROOTFS" /system/bin/service check batterypropreg 2>&1
             echo "--- service check batteryproperties:"
             "$ENVB" -i PATH=/system/bin LD_PRELOAD=/system/lib/libkobofb.so "$CHROOTB" "$ROOTFS" /system/bin/service check batteryproperties 2>&1
             echo "--- dmesg healthd/init:"

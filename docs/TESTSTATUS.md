@@ -25,3 +25,6 @@ Nach Ergänzung der QEMU-Eventkette laufen **42 Hosttests: 38 erfolgreich, 4 üb
 Der aktuelle Satz Kobo-Logs stammt laut Rootfs-Marker von API 21 und kann die KitKat-Änderungen nicht validieren. Ein echter Libra-Colour-Boot mit API 19 ist ebenfalls noch nicht nachgewiesen. Nach Aktualisierung muss auf dem Gerät `getprop sys.boot_completed` schließlich `1` liefern; außerdem müssen `batteryproperties` im ServiceManager erscheinen und die PTY-/iptables-Fehler verschwinden.
 
 Hosttests starten Android nicht und beweisen keinen Geräteboot. Kein Firmware- oder Kernelimage wird geschrieben. Die zusätzlichen Init-Mounts liegen unter dem Android-Rootfs, sollten aber wegen des auf älteren Kobo-Kerneln verwendeten, weniger isolierten Chroot-Fallbacks auf dem Zielgerät kontrolliert geprüft werden.
+
+## Ursache der verbleibenden NPE (BatteryService.java:167) – gefunden
+KitKat 4.4.x ruft in `BatteryService.<init>` `ServiceManager.getService("batterypropreg")` auf (verifiziert gegen android-4.4.4_r2). `kobo-healthd` registrierte nur `"batteryproperties"` (Name ab Android 5). `service check batteryproperties` meldete deshalb „found“, das Framework bekam aber `null` → NPE bei `registerListener`. Fix: `kobo-healthd` registriert jetzt beide Namen. Noch nicht auf Gerät verifiziert.
