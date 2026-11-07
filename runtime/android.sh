@@ -276,6 +276,7 @@ cleanup() {
     fi
     if [ -n "${watchdog_pid:-}" ]; then kill "$watchdog_pid" 2>/dev/null || true; fi
     if [ -n "${watch_pid:-}" ]; then kill "$watch_pid" 2>/dev/null || true; fi
+    if [ -n "${ime_fix_pid:-}" ]; then kill "$ime_fix_pid" 2>/dev/null || true; fi
     if [ -f "$BASE/android-init.log" ] || [ -n "${container_pid:-}" ]; then
         dmesg 2>/dev/null | grep -E 'init:|<init>|servicemanager|zygote|surfaceflinger|binder' | tail -n 200 >> "$BASE/android-init.log" 2>/dev/null || true
     fi
@@ -305,10 +306,21 @@ install_bundled_apps() {
         echo "Bundled APK installiert: $(basename "$apk")"
     done
 }
+start_ime_fix() {
+    [ -f "$BASE/ime-fix.sh" ] || return 0
+    mkdir -p "$ROOTFS/system/etc"
+    cp "$BASE/ime-fix.sh" "$ROOTFS/system/etc/kobo-ime-fix.sh"
+    chmod 0755 "$ROOTFS/system/etc/kobo-ime-fix.sh"
+    # Run after Android has booted; this also repairs an existing /data and
+    # does not require rebuilding the ext4 image.
+    "$ENVB" -i PATH=/system/bin:/system/xbin ANDROID_ROOT=/system ANDROID_DATA=/data \
+        "$CHROOT_BIN" "$ROOTFS" /system/etc/kobo-ime-fix.sh >/dev/null 2>&1 &
+    ime_fix_pid=$!
+}
 run() {
     root_required
     mkdir "$RUN/lock" 2>/dev/null || fail 'Schon gestartet oder alte Mounts vorhanden; status/recover prüfen.'
-    container_pid='' vnc_pid='' watchdog_pid='' watch_pid=''
+    container_pid='' vnc_pid='' watchdog_pid='' watch_pid='' ime_fix_pid=''
     trap cleanup EXIT
     trap 'exit 0' INT TERM HUP
     echo $$ > "$RUN/runner.pid"
@@ -319,6 +331,10 @@ run() {
     mount -t ext4 -o loop,noatime,nosuid "$BASE/rootfs.img" "$ROOTFS"
     [ -f "$ROOTFS/kobo-chroot" ] && [ "$(cat "$ROOTFS/kobo-chroot")" = 'android-kitkat_api19' ] || fail 'Falsches Rootfs: KitKat/API-19-Image erforderlich. Altes rootfs.img sichern, entfernen und neu installieren.'
     install_bundled_apps
+    CHROOT_BIN=$(command -v chroot) || fail 'chroot nicht gefunden.'
+    ENV_BIN=$(command -v env) || fail 'env nicht gefunden.'
+    ENVB="$ENV_BIN"
+    start_ime_fix
     patch_init_rc
     # Statisches /sbin/healthd ignoriert LD_PRELOAD (Binder-Shim) -> batteryproperties fehlt -> Boot-Schleife.
     grep -aq '/system/bin/linker' "$ROOTFS/sbin/healthd" 2>/dev/null || fail 'Rootfs veraltet: /sbin/healthd ist statisch (kein kobo-healthd). Neues Paket installieren.'
