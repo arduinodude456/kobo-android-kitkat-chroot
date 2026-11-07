@@ -145,6 +145,10 @@ on boot
 
 on boot
     class_start core
+
+# kobo-healthd setzt diese Property, sobald "batteryproperties" im servicemanager registriert ist.
+# Erst dann dürfen zygote/system_server starten (BatteryService.<init> braucht den Dienst sofort).
+on property:kobo.healthd.ready=1
     class_start main
 
 # Tombstones (/data/tombstones) mit Backtrace, falls surfaceflinger/zygote per Signal sterben.

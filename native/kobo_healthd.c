@@ -90,6 +90,7 @@ size_t kh_parse_token(const uint8_t *d, size_t n, const char *desc)
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <time.h>
@@ -101,8 +102,19 @@ static uint32_t listener[8]; static int nlistener;
 
 static void logmsg(const char *m)
 {
-    int l = open("/data/local/tmp/kobo-healthd.log", O_WRONLY | O_APPEND | O_CREAT, 0666);
-    if (l >= 0) { if (write(l, m, strlen(m)) < 0 || write(l, "\n", 1) < 0) { /* ignore */ } close(l); }
+    char line[200]; struct timespec ts; int l, k;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    k = snprintf(line, sizeof line, "[%5ld.%03ld] %s\n", (long)ts.tv_sec, ts.tv_nsec / 1000000, m);
+    if (k <= 0) return;
+    if (k >= (int)sizeof line) k = (int)sizeof line - 1;
+    l = open("/data/local/tmp/kobo-healthd.log", O_WRONLY | O_APPEND | O_CREAT, 0666);
+    if (l >= 0) { if (write(l, line, (size_t)k) < 0) { /* ignore */ } close(l); }
+    l = open("/dev/kmsg", O_WRONLY);
+    if (l >= 0) { char km[220]; int n = snprintf(km, sizeof km, "<6>kobo-healthd: %s\n", m); if (n > 0 && write(l, km, (size_t)n) < 0) { /* ignore */ } close(l); }
+}
+static void klog(const char *fmt, int a, int b)
+{
+    char m[120]; snprintf(m, sizeof m, fmt, a, b); logmsg(m);
 }
 static int bwr(const void *w, size_t wl, void *r, size_t rl, size_t *rc)
 {
@@ -134,17 +146,24 @@ static void send_props(uint32_t handle, struct kh_buf *w)
     kh_build_props(&b);
     if (!b.overflow) put_tr(w, KB_U_BC_TRANSACTION, handle, KH_FIRST_CALL, KH_TF_ONE_WAY, pb, b.len, NULL, 0);
 }
+/* BR_INCREFS/BR_ACQUIRE fuer unseren Knoten muessen mit *_DONE quittiert werden, sonst bleibt der Knoten im Kernel "pending". */
+static void ack_ref(uint32_t cmd, const uint8_t *src, struct kh_buf *w)
+{
+    kb_u_ptr_cookie pc; memcpy(&pc, src, sizeof pc);
+    put_cmd(w, cmd == KB_U_BR_INCREFS ? KB_U_BC_INCREFS_DONE : KB_U_BC_ACQUIRE_DONE, &pc, sizeof pc);
+}
 static int add_service(void)
 {
-    uint8_t pb[256], wb[256], rb[512]; struct kh_buf p, w; uint32_t off; size_t rc, pos;
+    uint8_t pb[256], wb[256], rb[512], ab[64]; struct kh_buf p, w, a; uint32_t off; size_t rc, pos;
     p.p = pb; p.cap = sizeof pb; p.len = 0; p.overflow = 0;
     kh_build_add_service(&p, "batteryproperties", local_token, &off);
     w.p = wb; w.cap = sizeof wb; w.len = 0; w.overflow = 0;
     put_cmd(&w, KB_BC_ENTER_LOOPER, NULL, 0);
     put_tr(&w, KB_U_BC_TRANSACTION, 0, KH_ADD_SERVICE, 0, pb, p.len, &off, 1);
     if (p.overflow || w.overflow) return -1;
-    if (bwr(wb, w.len, rb, sizeof rb, &rc) < 0) return -1;
+    if (bwr(wb, w.len, rb, sizeof rb, &rc) < 0) { klog("addService: ioctl errno=%d (%d)", errno, 0); return -1; }
     for (;;) {
+        a.p = ab; a.cap = sizeof ab; a.len = 0; a.overflow = 0;
         for (pos = 0; pos + 4 <= rc;) {
             uint32_t cmd; memcpy(&cmd, rb + pos, 4); pos += 4;
             if (cmd == KB_U_BR_REPLY) {
@@ -154,15 +173,19 @@ static int add_service(void)
                 if (t.data_size >= 4) memcpy(&status, (const void *)(uintptr_t)t.buffer, 4);
                 f.p = fb; f.cap = sizeof fb; f.len = 0; f.overflow = 0;
                 put_cmd(&f, fr, &t.buffer, 4);
+                if (a.len) bwr(ab, a.len, NULL, 0, NULL);
                 bwr(fb, f.len, NULL, 0, NULL);
+                klog("addService: reply status=%d size=%d", (int)status, (int)t.data_size);
                 return status == 0 ? 0 : -1;
             }
-            if (cmd == KB_BR_DEAD_REPLY || cmd == KB_BR_FAILED_REPLY) return -1;
+            if (cmd == KB_BR_DEAD_REPLY || cmd == KB_BR_FAILED_REPLY) { klog("addService: dead/failed reply 0x%x (%d)", (int)cmd, 0); return -1; }
             if (cmd == KB_BR_ERROR) pos += 4;
-            else if (cmd == KB_U_BR_INCREFS || cmd == KB_U_BR_ACQUIRE || cmd == KB_U_BR_RELEASE || cmd == KB_U_BR_DECREFS) pos += 8;
+            else if (cmd == KB_U_BR_INCREFS || cmd == KB_U_BR_ACQUIRE) { ack_ref(cmd, rb + pos, &a); pos += 8; }
+            else if (cmd == KB_U_BR_RELEASE || cmd == KB_U_BR_DECREFS) pos += 8;
             else if (cmd == KB_U_BR_TRANSACTION) pos += sizeof(kb_u_tr);
         }
-        if (bwr(NULL, 0, rb, sizeof rb, &rc) < 0) return -1;
+        if (a.len && !a.overflow) bwr(ab, a.len, NULL, 0, NULL);
+        if (bwr(NULL, 0, rb, sizeof rb, &rc) < 0) { klog("addService: read errno=%d (%d)", errno, 0); return -1; }
     }
 }
 static void serve(void)
@@ -216,15 +239,18 @@ int main(void)
         sleep(1);
     }
     if (fd < 0) { logmsg("open /dev/binder failed"); return 1; }
-    if (ioctl(fd, (int)KB_VERSION, &ver) < 0 || ver != KB_PROTOCOL_USER) { logmsg("binder version mismatch (LD_PRELOAD fehlt?)"); return 1; }
+    if (ioctl(fd, (int)KB_VERSION, &ver) < 0 || ver != KB_PROTOCOL_USER) { klog("binder version %d (erwartet %d): LD_PRELOAD fehlt?", (int)ver, (int)KB_PROTOCOL_USER); return 1; }
     map = mmap(NULL, 128 * 1024, PROT_READ, MAP_PRIVATE, fd, 0);
     if (map == MAP_FAILED) { logmsg("mmap failed"); return 1; }
     for (tries = 0; tries < 600; tries++) {   /* servicemanager darf spaeter starten */
         if (add_service() == 0) break;
+        klog("addService attempt %d failed (%d)", tries + 1, 0);
         { struct timespec ts = { 1, 0 }; nanosleep(&ts, NULL); }
     }
     if (tries >= 600) { logmsg("addService batteryproperties failed"); return 1; }
     logmsg("batteryproperties registered");
+    /* init.rc startet class main (zygote, surfaceflinger, ...) erst jetzt: system_server braucht den Dienst sofort. */
+    if (system("/system/bin/setprop kobo.healthd.ready 1") != 0) logmsg("setprop kobo.healthd.ready failed");
     serve();
     return 1;
 }
