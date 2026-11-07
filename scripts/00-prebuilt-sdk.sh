@@ -160,6 +160,8 @@ COMMON=(--sysroot="$SYSROOT" -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16 -
 grep -aF '/system/bin/linker' "$NATIVE/kobo-healthd" >/dev/null || {
     echo 'kobo-healthd is not a dynamic bionic executable' >&2; exit 1
 }
+# Mini-vold: MountService wartet sonst endlos auf /dev/socket/vold (im Chroot laeuft kein echtes vold).
+"$CC" "${COMMON[@]}" "$ROOT/native/kobo_vold.c" -static -o "$NATIVE/kobo-vold"
 grep -aF 'proc-mount fallback build 2026-11-02e' "$NATIVE/kobo-container" >/dev/null || {
     echo 'kobo-container binary was not rebuilt from the current source' >&2
     exit 1
@@ -167,6 +169,7 @@ grep -aF 'proc-mount fallback build 2026-11-02e' "$NATIVE/kobo-container" >/dev/
 sudo install -o root -g root -m 0644 "$NATIVE/libkobofb.so" "$PRODUCT/system/lib/libkobofb.so"
 sudo install -o root -g root -m 0755 "$NATIVE/kobo-vnc" "$PRODUCT/system/bin/kobo-vnc"
 sudo install -o root -g root -m 0755 "$NATIVE/kobo-container" "$PRODUCT/system/bin/kobo-container"
+sudo install -o root -g root -m 0755 "$NATIVE/kobo-vold" "$PRODUCT/system/bin/vold"
 sudo mkdir -p "$PRODUCT/root/sbin"
 sudo rm -f "$PRODUCT/root/sbin/healthd"
 sudo install -o root -g root -m 0755 "$NATIVE/kobo-healthd" "$PRODUCT/root/sbin/healthd"
@@ -178,7 +181,7 @@ EOF
 printf '%s\n' 'Android SDK API 19 KitKat ARM EABI v7a system image' > "$BUILD/AOSP-RELEASE.txt"
 printf '%s\n' 'prebuilt-system-image-sha256:ca7440cade53d829a8cace857cfad9afaa174c286d1b7a5d139e73cfcfde45d7' > "$BUILD/REPO-REVISION.txt"
 cat > "$BUILD/patches.json" <<'EOF'
-{"mode":"prebuilt-sdk-adaptation","changes":["replace emulator init with isolated Kobo init","set low-RAM software-rendered Kobo properties","remove emulator EGL/GLES shims","build Bionic framebuffer and Kobo helpers with NDK r10e","replace static /sbin/healthd with dynamic kobo-healthd (binder shim applies)"]}
+{"mode":"prebuilt-sdk-adaptation","changes":["replace emulator init with isolated Kobo init","set low-RAM software-rendered Kobo properties","remove emulator EGL/GLES shims","build Bionic framebuffer and Kobo helpers with NDK r10e","replace static /sbin/healthd with dynamic kobo-healthd (binder shim applies)","add minimal kobo-vold so MountService becomes ready"]}
 EOF
 cat > "$BUILD/build-container.json" <<'EOF'
 {"mode":"prebuilt-download-and-small-native-build","sdk":"Android KitKat API 19 ARM EABI v7a","ndk":"r10e","aosp-full-source-build":false}

@@ -191,6 +191,12 @@ service netd /system/bin/netd
     socket dnsproxyd stream 0660 root inet
     socket mdns stream 0660 root system
 
+# Minimaler vold-Ersatz (native/kobo_vold.c): MountService/VoldConnector braucht /dev/socket/vold,
+# sonst "still waiting for MountService ready..." und der Boot erreicht nie den Homescreen.
+service vold /system/bin/vold
+    class core
+    socket vold stream 0660 root mount
+
 service installd /system/bin/installd
     class core
     socket installd stream 0600 system system

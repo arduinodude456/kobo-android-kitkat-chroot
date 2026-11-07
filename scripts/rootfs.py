@@ -10,7 +10,7 @@ import subprocess
 
 REQUIRED = ('init', 'init.rc', 'sbin/healthd', 'init.environ.rc', 'default.prop',
     'system/build.prop', 'system/bin/app_process', 'system/bin/servicemanager',
-    'system/bin/surfaceflinger', 'system/bin/installd',
+    'system/bin/surfaceflinger', 'system/bin/installd', 'system/bin/vold',
     'system/lib/libkobofb.so', 'system/lib/hw/gralloc.default.so',
     'system/lib/egl/libGLES_android.so', 'system/framework/framework.jar')
 
@@ -45,7 +45,7 @@ def validate(stage):
                  'system/lib/libkobofb.so', 'system/lib/egl/libGLES_android.so',
                  'system/lib/hw/gralloc.default.so'):
         arm_elf(stage / name)
-    for name in ('kobo-vnc', 'kobo-container'):
+    for name in ('kobo-vnc', 'kobo-container', 'vold'):
         arm_elf(stage / 'system/bin' / name, static=True)
     arm_elf(stage / 'sbin/healthd')
     if not has_interp(stage / 'sbin/healthd'):
