@@ -145,6 +145,17 @@ static void kw_encode_ssid(const char *in, char *out, size_t cap)
     out[o] = 0;
 }
 
+/* Android NDK r10e kennt SOCK_CLOEXEC nicht. Setze FD_CLOEXEC portabel nach dem Erzeugen. */
+static int kw_socket(int domain, int type)
+{
+    int s = socket(domain, type, 0);
+    if (s >= 0 && fcntl(s, F_SETFD, FD_CLOEXEC) < 0) {
+        close(s);
+        return -1;
+    }
+    return s;
+}
+
 static int kw_host_link(const char *iface, struct kw_link *l)
 {
     struct ifreq ifr;
@@ -153,7 +164,7 @@ static int kw_host_link(const char *iface, struct kw_link *l)
     char line[256];
     memset(l, 0, sizeof *l);
     snprintf(l->mac, sizeof l->mac, "02:4b:6f:00:00:02");
-    s = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    s = kw_socket(AF_INET, SOCK_DGRAM);
     if (s < 0) return -1;
     memset(&ifr, 0, sizeof ifr);
     snprintf(ifr.ifr_name, sizeof ifr.ifr_name, "%s", iface);
@@ -435,7 +446,7 @@ static int kw_supplicant(const char *iface)
     chmod(w->dir, 0770);
     snprintf(path, sizeof path, "%s/%s", w->dir, iface);
     unlink(path);
-    sock = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    sock = kw_socket(AF_UNIX, SOCK_DGRAM);
     if (sock < 0) return 1;
     memset(&a, 0, sizeof a);
     a.sun_family = AF_UNIX;
@@ -473,7 +484,7 @@ static int kw_supplicant(const char *iface)
                 if (strncasecmp(cmd, "PING", 4) && strncasecmp(cmd, "SIGNAL_POLL", 11) && strncasecmp(cmd, "STATUS", 6))
                     kw_log("Kommando: %s", cmd);
                 rl = kw_command(w, &from, fl, cmd, rep, sizeof rep);
-                if (fl > sizeof(sa_family_t) && rl)
+                if (fl > (socklen_t)sizeof(sa_family_t) && rl)
                     if (sendto(sock, rep, rl, MSG_DONTWAIT, (struct sockaddr *)&from, fl) < 0)
                         kw_log("Antwort an Client fehlgeschlagen: %s", strerror(errno));
             }
