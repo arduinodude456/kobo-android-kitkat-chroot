@@ -243,6 +243,19 @@ class NativeTests(unittest.TestCase):
             update = c.update()
             self.assertEqual(update[0][:4], (0, 1, 8, 4))
 
+    def test_incremental_update_is_narrowed_to_changed_columns(self):
+        with self.server() as (shared, c, _, _):
+            c.request(); c.update()
+            c.request(True)
+            with (shared / "fb.bin").open("r+b") as f, mmap.mmap(f.fileno(), 0) as pixels:
+                start = 2 * 16 + 2 * 2          # row 2, pixels 2 and 3 of an 8x6 page
+                pixels[start:start + 4] = struct.pack("<H", 0xF800) * 2
+            self.assertEqual(c.update(), [(2, 2, 2, 1, b"\x00\xf8" * 2)])
+            # A 32 bit client gets the same narrow rectangle, converted in one pass.
+            c.pixel_format(32, False, (16, 8, 0))
+            c.request(False, 0, 2, 8, 1)
+            self.assertEqual(c.update()[0][:4], (0, 2, 8, 1))
+
     def test_pending_incremental_accepts_new_full_request(self):
         with self.server() as (_, c, _, _):
             c.request(); c.update()

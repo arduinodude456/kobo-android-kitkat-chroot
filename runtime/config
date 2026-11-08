@@ -9,3 +9,7 @@ KOBO_ASHMEM_DEVICE=/dev/ashmem
 KOBO_ALLOW_UNSAFE_NO_NAMESPACES=1
 # Display is deliberately fixed to 600x800 RGB565 in this low-RAM build.
 # VNC is deliberately fixed to IPv4 loopback 127.0.0.1:5963 (no network password).
+# WLAN-Bruecke (siehe docs/WLAN.md): 1 = Host-WLAN fuer Android sichtbar, 0 = aus.
+KOBO_NET=1
+# Host-Schnittstelle; leer = automatisch (Default-Route, sonst wlan0).
+KOBO_NET_IFACE=

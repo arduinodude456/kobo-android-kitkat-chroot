@@ -8,6 +8,7 @@
 #define _LARGEFILE64_SOURCE
 #include "kobo_fb.h"
 #include "kobo_binder.h"
+#include "kobo_net.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/fb.h>
@@ -94,6 +95,7 @@ static int redirect(int dirfd, const char *path)
 static int do_open(int dirfd, const char *path, int flags, mode_t mode)
 {
     char target[4096];
+    if (kobo_net_hides_path(path, flags)) path = "/dev/null";   /* netd darf Host-sysctl nicht schreiben */
     if (redirect(dirfd, path)) {
         if (initialize() < 0) return -1;
         if (flags & (O_TRUNC | O_EXCL | O_DIRECTORY)) { errno = EINVAL; return -1; }
@@ -196,6 +198,7 @@ int ioctl(int fd, unsigned long request, ...)
         && request != TIOCEXCL && request != TIOCNXCL
 #endif
     ) { va_start(ap, request); arg = va_arg(ap, void *); va_end(ap); }
+    if (kobo_net_blocks((unsigned long)request, arg)) return 0;
     /* KitKat API 19 userspace speaks the 32 bit binder ABI, the kernel the 64 bit one. */
     if (kobo_binder_wants((uint32_t)request)) return (int)kobo_binder_ioctl(fd, (unsigned long)request, arg, raw_ioctl);
     if (!fake_fd(fd)) return (int)syscall(SYS_ioctl, fd, request, arg);

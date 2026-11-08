@@ -68,14 +68,49 @@ local function u32(s, i) local a,b,c,d=s:byte(i,i+3); return ((a*256+b)*256+c)*2
 local function p16(v) return string.char(math.floor(v/256)%256, v%256) end
 local function p32(v) return p16(math.floor(v/65536)%65536)..p16(v%65536) end
 local RFB = {}; RFB.__index = RFB
--- 2x2-Bayer-Matrix fuer 1-Bit-Dithering je Farbkanal. Dadurch entstehen
--- ausschliesslich die acht Farben (RGB jeweils 0 oder 255).
-local BAYER2={{0,2},{3,1}}
-local function dither_channel(value,x,y)
-    local threshold=(BAYER2[y%2+1][x%2+1]+0.5)*64
-    return value>=threshold and 255 or 0
-end
+-- 1-Bit-Dithering je Farbkanal (2x2-Bayer, Schwellen wie bisher). Statt pro Pixel drei
+-- Vergleiche in Lua auszufuehren, gibt es je Phase (dx%2, dy%2) eine Tabelle
+-- RGB565 -> fertiges RGB32-Pixel (acht erlaubte Farben). Pro Ausgabepixel bleibt ein
+-- einziger Tabellenzugriff.
+local bit=require("bit")
 local DITHER_THRESHOLDS={32,160,224,96}
+local lut_cache
+local function build_lut()
+    if lut_cache then return lut_cache end
+    local lut=ffi.new("uint32_t[?]",4*65536)
+    for p=0,65535 do
+        local r5=bit.rshift(p,11); local g6=bit.band(bit.rshift(p,5),63); local b5=bit.band(p,31)
+        local r=bit.bor(bit.lshift(r5,3),bit.rshift(r5,2))
+        local g=bit.bor(bit.lshift(g6,2),bit.rshift(g6,4))
+        local b=bit.bor(bit.lshift(b5,3),bit.rshift(b5,2))
+        for k=0,3 do
+            local t=DITHER_THRESHOLDS[k+1]
+            local v=0xff000000
+            if r>=t then v=v+0xff end
+            if g>=t then v=v+0xff00 end
+            if b>=t then v=v+0xff0000 end
+            lut[k*65536+p]=v
+        end
+    end
+    lut_cache=lut; return lut
+end
+-- Zeichnet nur den geaenderten Quellbereich [sx0,sx1)x[sy0,sy1) skaliert (nearest) und
+-- gedithert in den Canvas. Liefert den betroffenen Zielbereich (exklusive Obergrenze).
+local function render_region(fb16,w,h,canvas,cstride4,xmap,ymap,draw_w,draw_h,sx0,sy0,sx1,sy1,lut)
+    local dx0=math.max(0,math.ceil(sx0*draw_w/w)); local dx1=math.min(draw_w,math.ceil(sx1*draw_w/w))
+    local dy0=math.max(0,math.ceil(sy0*draw_h/h)); local dy1=math.min(draw_h,math.ceil(sy1*draw_h/h))
+    if dx1<=dx0 or dy1<=dy0 then return nil end
+    local band=bit.band
+    for dy=dy0,dy1-1 do
+        local srow=fb16+ymap[dy]*w
+        local drow=canvas+dy*cstride4
+        local rowk=band(dy,1)*131072
+        for dx=dx0,dx1-1 do
+            drow[dx]=lut[rowk+band(dx,1)*65536+srow[xmap[dx]]]
+        end
+    end
+    return dx0,dy0,dx1,dy1
+end
 function RFB:send(s)
     -- Only tiny control packets. A blocked/closed local peer is an error, not a UI hang.
     self.sock:settimeout(0.2)
@@ -88,39 +123,52 @@ function RFB:read(n)
     if not data then error("RFB Handshake: " .. tostring(err)) end
     return data
 end
+-- Verbindungsobjekt mit festem Empfangspuffer (ffi) und lokalem RGB565-Abbild des
+-- Android-Bildschirms. Kein String-Anhaengen/Abschneiden mehr: das kostete bei einem
+-- 1-MB-Frame quadratisch viel Kopierarbeit.
+function RFB.attach(sock, w, h)
+    local self = setmetatable({sock=sock, w=w, h=h, rects=nil}, RFB)
+    self.cap = w*h*2 + 65536
+    self.rx = ffi.new("uint8_t[?]", self.cap); self.pos, self.len = 0, 0
+    self.fb = ffi.new("uint16_t[?]", w*h)
+    self.fb8 = ffi.cast("uint8_t*", self.fb)
+    ffi.fill(self.fb, w*h*2, 0xff)
+    return self
+end
 function RFB.connect()
     local s = assert(socket.tcp())
     s:settimeout(0.35)
     local ok, err = s:connect(HOST, PORT)
     if not ok then s:close(); return nil, err end
-    local self = setmetatable({sock=s, buf="", rects=nil}, RFB)
+    local hs = setmetatable({sock=s}, RFB)
+    local result
     local success, why = pcall(function()
         s:settimeout(1)
-        assert(self:read(12) == "RFB 003.008\n", "RFB-Version wird nicht unterstützt")
+        assert(hs:read(12) == "RFB 003.008\n", "RFB-Version wird nicht unterstützt")
         assert(s:send("RFB 003.008\n"))
-        local n = self:read(1):byte(); assert(n > 0 and n <= 16, "RFB Security")
-        local types = self:read(n); assert(types:find("\1", 1, true), "Nur lokales RFB ohne Auth wird unterstützt")
-        assert(s:send("\1")); assert(u32(self:read(4),1)==0, "RFB verweigert")
+        local n = hs:read(1):byte(); assert(n > 0 and n <= 16, "RFB Security")
+        local types = hs:read(n); assert(types:find("\1", 1, true), "Nur lokales RFB ohne Auth wird unterstützt")
+        assert(s:send("\1")); assert(u32(hs:read(4),1)==0, "RFB verweigert")
         assert(s:send("\1"))
-        local init = self:read(24)
-        self.w, self.h = u16(init,1), u16(init,3)
-        assert(self.w >= 1 and self.w <= 1024 and self.h >= 1 and self.h <= 1024, "Ungültige Bildgröße")
-        assert(self.w*self.h <= 786432, "Bild ist zu groß")
-        local namelen=u32(init,21); assert(namelen<=1024,"Desktopname zu lang"); self:read(namelen)
-        -- KOReader RGB32 memory layout: R,G,B,alpha; raw-only, little endian.
-        assert(s:send("\0\0\0\0" .. string.char(32,24,0,1) .. p16(255)..p16(255)..p16(255)..string.char(0,8,16).."\0\0\0"))
+        local init = hs:read(24)
+        local w, h = u16(init,1), u16(init,3)
+        assert(w >= 1 and w <= 1024 and h >= 1 and h <= 1024, "Ungültige Bildgröße")
+        assert(w*h <= 786432, "Bild ist zu groß")
+        local namelen=u32(init,21); assert(namelen<=1024,"Desktopname zu lang"); hs:read(namelen)
+        -- RGB565 little endian = Format des Android-Framebuffers: der Server kopiert nur noch
+        -- Speicher (halbe Datenmenge, keine Umrechnung); der Client dithert per Tabelle.
+        assert(s:send("\0\0\0\0" .. string.char(16,16,0,1) .. p16(31)..p16(63)..p16(31)..string.char(11,5,0).."\0\0\0"))
         assert(s:send("\2\0"..p16(1)..p32(0)))
-        self.bb=Blitbuffer.new(self.w,self.h,Blitbuffer.TYPE_BBRGB32)
-        self.bb:fill(Blitbuffer.COLOR_WHITE)
+        result = RFB.attach(s, w, h)
         s:settimeout(0)
-        self:request(false)
+        result:request(false)
     end)
-    if not success then self:close(); return nil, why end
-    return self
+    if not success then if result then result:close() else s:close() end; return nil, why end
+    return result
 end
 function RFB:close()
     if self.sock then self.sock:close(); self.sock=nil end
-    if self.bb then self.bb:free(); self.bb=nil end
+    self.fb=nil; self.fb8=nil; self.rx=nil
 end
 function RFB:request(incremental)
     self:send("\3"..string.char(incremental and 1 or 0)..p16(0)..p16(0)..p16(self.w)..p16(self.h))
@@ -130,52 +178,80 @@ function RFB:pointer(x,y,down)
     x=math.max(0,math.min(self.w-1,math.floor(x))); y=math.max(0,math.min(self.h-1,math.floor(y)))
     self:send("\5"..string.char(down and 1 or 0)..p16(x)..p16(y))
 end
-function RFB:take(n)
-    if #self.buf<n then return nil end
-    local s=self.buf:sub(1,n); self.buf=self.buf:sub(n+1); return s
+function RFB:consume(n)
+    self.pos=self.pos+n
+    if self.pos>=self.len then self.pos,self.len=0,0 end
+end
+-- Den Socket in einem Tick komplett leeren (bis der Puffer voll ist). Frueher waren es
+-- hoechstens 4x32 KB pro 50 ms = 2,5 MB/s, also unter einem Vollbild pro Sekunde.
+function RFB:fill()
+    for _=1,16 do
+        local room=self.cap-self.len
+        if room<=0 and self.pos>0 then
+            ffi.copy(self.rx,self.rx+self.pos,self.len-self.pos)
+            self.len=self.len-self.pos; self.pos=0; room=self.cap-self.len
+        end
+        if room<=0 then break end
+        local data,err,part=self.sock:receive(math.min(room,262144))
+        data=data or part
+        local n=data and #data or 0
+        if n>0 then ffi.copy(self.rx+self.len,data,n); self.len=self.len+n end
+        if err=="closed" then error("Android-Verbindung beendet") end
+        if err=="timeout" or n==0 then break end
+    end
+end
+function RFB:mark(x0,y0,x1,y1)
+    if self.dx0 then
+        if x0<self.dx0 then self.dx0=x0 end; if y0<self.dy0 then self.dy0=y0 end
+        if x1>self.dx1 then self.dx1=x1 end; if y1>self.dy1 then self.dy1=y1 end
+    else self.dx0,self.dy0,self.dx1,self.dy1=x0,y0,x1,y1 end
+end
+function RFB:take_dirty()
+    local x0,y0,x1,y1=self.dx0,self.dy0,self.dx1,self.dy1
+    self.dx0,self.dy0,self.dx1,self.dy1=nil,nil,nil,nil
+    return x0,y0,x1,y1
 end
 function RFB:poll()
     -- No blocking receive on the KOReader UI thread. Bound both memory and work.
-    for _=1,4 do
-        local data,err,part=self.sock:receive(32768)
-        data=data or part
-        if data and #data>0 then self.buf=self.buf..data end
-        if #self.buf>self.w*self.h*4+65536 then error("RFB Puffergrenze überschritten") end
-        if err=="closed" then error("Android-Verbindung beendet") end
-        if err=="timeout" then break end
-    end
+    self:fill()
     local changed=false
-    for _=1,16 do
+    for _=1,64 do
+        local avail=self.len-self.pos
+        local rx,pos=self.rx,self.pos
         if self.pixel_rect then
-            local r=self.pixel_rect; local data=self:take(r.w*r.h*4)
-            if not data then break end
-            local stride=tonumber(self.bb.stride) or self.w*4
-            local src=ffi.cast("const uint8_t*",data)
-            for row=0,r.h-1 do
-                local dst=ffi.cast("uint8_t*",self.bb.data)+(r.y+row)*stride+r.x*4
-                ffi.copy(dst,src+row*r.w*4,r.w*4)
-                for col=0,r.w-1 do dst[col*4+3]=255 end
+            local r=self.pixel_rect; local need=r.w*r.h*2
+            if avail<need then break end
+            local src=rx+pos
+            if r.x==0 and r.w==self.w then
+                ffi.copy(self.fb8+r.y*self.w*2,src,need)
+            else
+                for row=0,r.h-1 do ffi.copy(self.fb8+((r.y+row)*self.w+r.x)*2,src+row*r.w*2,r.w*2) end
             end
+            self:consume(need); self:mark(r.x,r.y,r.x+r.w,r.y+r.h)
             self.pixel_rect=nil; self.rects=self.rects-1; changed=true
         elseif self.rects and self.rects>0 then
-            local r=self:take(12); if not r then break end
-            local x,y,w,h=u16(r,1),u16(r,3),u16(r,5),u16(r,7)
-            assert(u32(r,9)==0,"Unbekanntes RFB-Encoding")
+            if avail<12 then break end
+            local x,y=rx[pos]*256+rx[pos+1],rx[pos+2]*256+rx[pos+3]
+            local w,h=rx[pos+4]*256+rx[pos+5],rx[pos+6]*256+rx[pos+7]
+            local enc=((rx[pos+8]*256+rx[pos+9])*256+rx[pos+10])*256+rx[pos+11]
+            assert(enc==0,"Unbekanntes RFB-Encoding")
             assert(w>0 and h>0 and x+w<=self.w and y+h<=self.h,"Ungültiges RFB-Rechteck")
-            self.pixel_rect={x=x,y=y,w=w,h=h}
+            self:consume(12); self.pixel_rect={x=x,y=y,w=w,h=h}
         elseif self.rects==0 then
             self.rects=nil; self:request(true)
         else
-            if #self.buf<1 then break end
-            local t=self.buf:byte(1)
+            if avail<1 then break end
+            local t=rx[pos]
             if t==0 then
-                if #self.buf<4 then break end
-                local head=self:take(4); self.rects=u16(head,3); assert(self.rects<=64,"Zu viele RFB-Rechtecke")
-            elseif t==2 then self:take(1)
+                if avail<4 then break end
+                self.rects=rx[pos+2]*256+rx[pos+3]; assert(self.rects<=64,"Zu viele RFB-Rechtecke")
+                self:consume(4)
+            elseif t==2 then self:consume(1)
             elseif t==3 then
-                if #self.buf<8 then break end
-                local n=u32(self.buf,5); assert(n<=4096,"Zwischenablage zu groß")
-                if #self.buf<8+n then break end; self:take(8+n)
+                if avail<8 then break end
+                local n=((rx[pos+4]*256+rx[pos+5])*256+rx[pos+6])*256+rx[pos+7]
+                assert(n<=4096,"Zwischenablage zu groß")
+                if avail<8+n then break end; self:consume(8+n)
             else error("Unbekannte RFB-Nachricht") end
         end
     end
@@ -210,6 +286,11 @@ function View:init()
     for i,d in ipairs(defs) do
         self.buttons[i]={label=TextWidget:new{text=d[1],face=self.face},key=d[2],rect=Geom:new{x=(i-1)*bw,y=self.dimen.h-90,w=bw,h=90}}
     end
+    -- WLAN fuer Android: Der Kobo verbindet, Android spiegelt den Zustand (docs/WLAN.md).
+    pcall(function()
+        local NM=require("ui/network/manager")
+        if NM.isWifiOn and not NM:isWifiOn() and NM.turnOnWifi then NM:turnOnWifi() end
+    end)
     recover_stale_state()
     os.execute(command("start") .. " >/dev/null 2>&1")
     self.deadline=socket.gettime()+180
@@ -217,35 +298,29 @@ function View:init()
     UIManager:scheduleIn(0.5,self.tick)
 end
 function View:paintTo(bb,x,y)
-    bb:paintRect(x,y,self.dimen.w,self.dimen.h,Blitbuffer.COLOR_WHITE)
-    if self.rfb then
-        -- Das Android-Bild nimmt die gesamte Fläche oberhalb der Buttons ein.
-        -- blitFrom() skaliert nicht; deshalb wird hier mit nearest-neighbour
-        -- direkt zwischen den beiden RGB32-Blitbuffer kopiert und dabei auf
-        -- die acht erlaubten Farben gedithert.
-        local src=self.rfb.bb
-        local src_stride=tonumber(src.stride) or self.rfb.w*4
-        local dst_stride=tonumber(bb.stride) or self.dimen.w*4
-        local src_base=ffi.cast("const uint8_t*",src.data)
-        local dst_base=ffi.cast("uint8_t*",bb.data)
-        local xmap=self.xmap; local ymap=self.ymap
-        local thresholds=DITHER_THRESHOLDS
-        for dy=0,self.draw_h-1 do
-            local sy=ymap[dy+1]
-            local srow=src_base+sy*src_stride
-            local drow=dst_base+(y+self.oy+dy)*dst_stride+(x+self.ox)*4
-            for dx=0,self.draw_w-1 do
-                local sx=xmap[dx+1]
-                local sp=srow+sx*4
-                local dp=drow+dx*4
-                local threshold=thresholds[(dy%2)*2+(dx%2)+1]
-                dp[0]=sp[0]>=threshold and 255 or 0
-                dp[1]=sp[1]>=threshold and 255 or 0
-                dp[2]=sp[2]>=threshold and 255 or 0
-                dp[3]=255
-            end
+    if self.rfb and self.canvas then
+        -- Das Android-Bild liegt fertig skaliert und gedithert im Canvas (wird nur fuer die
+        -- geaenderten Pixel in pollAndroid() aktualisiert). Hier bleibt je Zeile ein memcpy.
+        local dw,dh=self.draw_w,self.draw_h
+        local same=true
+        if type(bb.getType)=="function" and Blitbuffer.TYPE_BBRGB32 then
+            same=(bb:getType()==Blitbuffer.TYPE_BBRGB32)
         end
-    else self.status:paintTo(bb,x+20,y+40) end
+        if same then
+            local dst_stride=tonumber(bb.stride) or self.dimen.w*4
+            local dst_base=ffi.cast("uint8_t*",bb.data)
+            local src_base=ffi.cast("const uint8_t*",self.canvas)
+            local rowbytes=dw*4
+            for dy=0,dh-1 do
+                ffi.copy(dst_base+(y+self.oy+dy)*dst_stride+(x+self.ox)*4,src_base+dy*rowbytes,rowbytes)
+            end
+        elseif self.canvas_bb then
+            bb:blitFrom(self.canvas_bb,x+self.ox,y+self.oy,0,0,dw,dh)
+        end
+    else
+        bb:paintRect(x,y,self.dimen.w,self.dimen.h,Blitbuffer.COLOR_WHITE)
+        self.status:paintTo(bb,x+20,y+40)
+    end
     for _,b in ipairs(self.buttons) do
         local r=b.rect; bb:paintRect(x+r.x,y+r.y,r.w-2,r.h,Blitbuffer.COLOR_BLACK)
         bb:paintRect(x+r.x+2,y+r.y+2,r.w-6,r.h-4,Blitbuffer.COLOR_WHITE)
@@ -256,41 +331,57 @@ function View:fail(text)
     UIManager:close(self,"full")
     UIManager:show(InfoMessage:new{text=text .. "\n\n" .. diagnostics()})
 end
+function View:setupCanvas(rfb)
+    self.draw_w=self.dimen.w
+    self.draw_h=self.dimen.h-90
+    self.ox=0; self.oy=0
+    local dw,dh=self.draw_w,self.draw_h
+    self.xmap=ffi.new("uint16_t[?]",dw); self.ymap=ffi.new("uint16_t[?]",dh)
+    for dx=0,dw-1 do self.xmap[dx]=math.min(rfb.w-1,math.floor(dx*rfb.w/dw)) end
+    for dy=0,dh-1 do self.ymap[dy]=math.min(rfb.h-1,math.floor(dy*rfb.h/dh)) end
+    self.canvas=ffi.new("uint32_t[?]",dw*dh)
+    ffi.fill(self.canvas,dw*dh*4,0xff)
+    if Blitbuffer.new and Blitbuffer.TYPE_BBRGB32 then
+        local ok,cbb=pcall(Blitbuffer.new,dw,dh,Blitbuffer.TYPE_BBRGB32,self.canvas,dw*4)
+        if ok then self.canvas_bb=cbb end
+    end
+    self.lut=build_lut()
+end
 function View:pollAndroid()
     if self.closed then return end
+    local delay=0.03
     if not self.rfb then
         local rfb=RFB.connect()
         if rfb then
             self.rfb=rfb
-            self.draw_w=self.dimen.w
-            self.draw_h=self.dimen.h-90
-            self.ox=0; self.oy=0
-            self.xmap={}; self.ymap={}
-            for dx=0,self.draw_w-1 do
-                self.xmap[dx+1]=math.min(rfb.w-1,math.floor(dx*rfb.w/self.draw_w))
-            end
-            for dy=0,self.draw_h-1 do
-                self.ymap[dy+1]=math.min(rfb.h-1,math.floor(dy*rfb.h/self.draw_h))
-            end
+            self:setupCanvas(rfb)
             self.next_full_refresh=socket.gettime()+30
             UIManager:setDirty(self,"full")
         elseif socket.gettime()>self.deadline then self:fail("Android konnte nicht gestartet werden."); return end
     else
         local ok,changed=pcall(self.rfb.poll,self.rfb)
         if not ok then self:fail(tostring(changed)); return end
-        local now=socket.gettime()
-        local mode=changed and "fast" or nil
-        if now >= (self.next_full_refresh or now+30) then
-            mode="full"
-            self.next_full_refresh=now+30
+        local region
+        if changed then
+            local sx0,sy0,sx1,sy1=self.rfb:take_dirty()
+            if sx0 then
+                local dx0,dy0,dx1,dy1=render_region(self.rfb.fb,self.rfb.w,self.rfb.h,self.canvas,self.draw_w,
+                    self.xmap,self.ymap,self.draw_w,self.draw_h,sx0,sy0,sx1,sy1,self.lut)
+                if dx0 then region=Geom:new{x=self.ox+dx0,y=self.oy+dy0,w=dx1-dx0,h=dy1-dy0} end
+            end
+            delay=0.01
         end
-        if mode=="full" then
+        local now=socket.gettime()
+        if now >= (self.next_full_refresh or now+30) then
+            self.next_full_refresh=now+30
             UIManager:setDirty(self,"full")
-        elseif mode=="fast" then
-            UIManager:setDirty(self,"fast",Geom:new{x=self.ox,y=self.oy,w=self.draw_w,h=self.draw_h})
+        elseif region then
+            -- Nur der geaenderte Ausschnitt wird am E-Ink aufgefrischt: kleinere Flaeche =
+            -- deutlich kuerzere Panel-Updatezeit.
+            UIManager:setDirty(self,"fast",region)
         end
     end
-    UIManager:scheduleIn(0.05,self.tick)
+    UIManager:scheduleIn(delay,self.tick)
 end
 function View:pulse(key)
     if not self.rfb then return end
@@ -386,5 +477,5 @@ function M.open()
     if not ok then UIManager:show(InfoMessage:new{text=err}); return false end
     UIManager:show(View:new{}); return true
 end
-M._test={RFB=RFB,quote=quote,p16=p16,p32=p32,pointer_action=pointer_action}
+M._test={RFB=RFB,quote=quote,p16=p16,p32=p32,pointer_action=pointer_action,build_lut=build_lut,render_region=render_region}
 return M

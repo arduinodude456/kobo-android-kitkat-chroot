@@ -277,6 +277,7 @@ cleanup() {
     if [ -n "${watchdog_pid:-}" ]; then kill "$watchdog_pid" 2>/dev/null || true; fi
     if [ -n "${watch_pid:-}" ]; then kill "$watch_pid" 2>/dev/null || true; fi
     if [ -n "${ime_fix_pid:-}" ]; then kill "$ime_fix_pid" 2>/dev/null || true; fi
+    if [ -n "${net_pid:-}" ]; then kill "$net_pid" 2>/dev/null || true; fi
     if [ -f "$BASE/android-init.log" ] || [ -n "${container_pid:-}" ]; then
         dmesg 2>/dev/null | grep -E 'init:|<init>|servicemanager|zygote|surfaceflinger|binder' | tail -n 200 >> "$BASE/android-init.log" 2>/dev/null || true
     fi
@@ -306,6 +307,148 @@ install_bundled_apps() {
         echo "Bundled APK installiert: $(basename "$apk")"
     done
 }
+# ---- WLAN-Bruecke: Host-WLAN fuer Android sichtbar machen (siehe docs/WLAN.md) ------------------------
+# Android teilt den Netzwerkstack mit dem Kobo. kobo-wpa spiegelt den WLAN-Zustand des Hosts in
+# Androids Wi-Fi-Stack (wpa_supplicant-/dhcpcd-Attrappe), damit Browser, Downloads und Apps "online" sind.
+# Verbinden und Passwort bleiben beim Kobo/KOReader; Android veraendert nie Adressen oder Routen.
+net_iface() {
+    if [ -n "${KOBO_NET_IFACE:-}" ]; then echo "$KOBO_NET_IFACE"; return 0; fi
+    i=$(awk 'NR > 1 && $2 == "00000000" { print $1; exit }' /proc/net/route 2>/dev/null || true)
+    [ -n "$i" ] || i=wlan0
+    echo "$i"
+}
+net_ssid() {
+    iface=$1; s=''
+    command -v iwgetid >/dev/null 2>&1 && s=$(iwgetid -r "$iface" 2>/dev/null || true)
+    if [ -z "$s" ] && command -v wpa_cli >/dev/null 2>&1; then
+        s=$(wpa_cli -i "$iface" status 2>/dev/null | sed -n 's/^ssid=//p' | head -n 1 || true)
+    fi
+    if [ -z "$s" ] && command -v iwconfig >/dev/null 2>&1; then
+        s=$(iwconfig "$iface" 2>/dev/null | sed -n 's/.*ESSID:"\(.*\)".*/\1/p' | head -n 1 || true)
+    fi
+    echo "${s:-Kobo-WLAN}"
+}
+net_write_env() {
+    iface=$1; f="$ROOTFS/data/local/tmp/kobo-net.env"
+    mkdir -p "$ROOTFS/data/local/tmp" 2>/dev/null || return 0
+    {
+        echo "IFACE=$iface"
+        echo "SSID=$(net_ssid "$iface")"
+        n=0
+        for ns in $(awk '$1 == "nameserver" { print $2 }' /etc/resolv.conf 2>/dev/null || true); do
+            n=$((n + 1)); [ "$n" -le 2 ] && echo "DNS$n=$ns"
+        done
+    } > "$f.new" 2>/dev/null && mv "$f.new" "$f" && chmod 0644 "$f"
+}
+patch_net_rc() {
+    iface=$1; rc="$ROOTFS/init.rc"; tmp="$RUN/init.rc.net"
+    [ -f "$rc" ] || return 0
+    awk '/^# KOBO_NET_BEGIN/ { skip = 1 } !skip { print } /^# KOBO_NET_END/ { skip = 0 }' "$rc" > "$tmp" || return 1
+    cat >> "$tmp" <<NETRC
+# KOBO_NET_BEGIN iface=$iface
+on init
+    mkdir /data/misc/wifi 0770 wifi wifi
+    mkdir /data/misc/wifi/sockets 0770 wifi wifi
+    mkdir /data/misc/dhcp 0770 dhcp dhcp
+    setprop wifi.interface $iface
+    setprop wlan.driver.status ok
+
+service wpa_supplicant /system/bin/kobo-wpa --supplicant $iface
+    class main
+    disabled
+    oneshot
+
+service p2p_supplicant /system/bin/kobo-wpa --supplicant $iface
+    class main
+    disabled
+    oneshot
+
+service dhcpcd_$iface /system/bin/kobo-wpa --dhcp $iface
+    class main
+    disabled
+    oneshot
+# KOBO_NET_END
+NETRC
+    cat "$tmp" > "$rc" && rm -f "$tmp"
+}
+net_install() {
+    iface=$1
+    if [ -f "$BASE/bin/kobo-wpa" ]; then
+        cp "$BASE/bin/kobo-wpa" "$ROOTFS/system/bin/kobo-wpa" && chmod 0755 "$ROOTFS/system/bin/kobo-wpa"
+    fi
+    [ -x "$ROOTFS/system/bin/kobo-wpa" ] || { echo 'WLAN-Bruecke: kobo-wpa fehlt (Paket veraltet); Android startet ohne WLAN.' >&2; return 1; }
+    # Aktualisierte Shim-Bibliothek (Schutz des Host-Netzwerks); ohne sie bleibt die alte aktiv.
+    if [ -f "$BASE/bin/libkobofb.so" ]; then
+        cp "$BASE/bin/libkobofb.so" "$ROOTFS/system/lib/libkobofb.so" && chmod 0644 "$ROOTFS/system/lib/libkobofb.so"
+    fi
+    mkdir -p "$ROOTFS/system/etc/wifi" "$ROOTFS/system/etc/permissions"
+    [ -f "$ROOTFS/system/etc/wifi/wpa_supplicant.conf" ] || printf 'update_config=1\nctrl_interface=%s\neapol_version=1\nap_scan=1\nfast_reauth=1\n' "$iface" > "$ROOTFS/system/etc/wifi/wpa_supplicant.conf"
+    chmod 0644 "$ROOTFS/system/etc/wifi/wpa_supplicant.conf"
+    printf '<?xml version="1.0" encoding="utf-8"?>\n<permissions>\n    <feature name="android.hardware.wifi" />\n</permissions>\n' > "$ROOTFS/system/etc/permissions/kobo-wifi.xml"
+    chmod 0644 "$ROOTFS/system/etc/permissions/kobo-wifi.xml"
+    mkdir -p "$ROOTFS/data/misc/wifi/sockets" "$ROOTFS/data/misc/dhcp"
+    chown 1010:1010 "$ROOTFS/data/misc/wifi" "$ROOTFS/data/misc/wifi/sockets" 2>/dev/null || true
+    chmod 0770 "$ROOTFS/data/misc/wifi" "$ROOTFS/data/misc/wifi/sockets" 2>/dev/null || true
+    chown 1014:1000 "$ROOTFS/data/misc/dhcp" 2>/dev/null || true
+    chmod 0770 "$ROOTFS/data/misc/dhcp" 2>/dev/null || true
+    # Aktuelle CA-Wurzeln: KitKat kennt z. B. ISRG Root X1 nicht -> sonst scheitert fast jedes HTTPS.
+    if [ -d "$BASE/cacerts" ]; then
+        mkdir -p "$ROOTFS/system/etc/security/cacerts"
+        for c in "$BASE/cacerts"/*; do
+            [ -f "$c" ] || continue
+            [ -e "$ROOTFS/system/etc/security/cacerts/$(basename "$c")" ] || { cp "$c" "$ROOTFS/system/etc/security/cacerts/" && chmod 0644 "$ROOTFS/system/etc/security/cacerts/$(basename "$c")"; }
+        done
+    fi
+    patch_net_rc "$iface"
+    echo "WLAN-Bruecke bereit (Host-Schnittstelle $iface)"
+}
+agp() { chroot "$ROOTFS" /system/bin/getprop "$1" 2>/dev/null | tr -d '\r'; }
+android_run() {
+    bcp=$(sed -n 's/^ *export BOOTCLASSPATH *//p' "$ROOTFS/init.environ.rc" 2>/dev/null | head -n 1)
+    "$ENVB" -i PATH=/system/bin:/system/xbin ANDROID_ROOT=/system ANDROID_DATA=/data ANDROID_ASSETS=/system/app \
+        BOOTCLASSPATH="$bcp" EXTERNAL_STORAGE=/storage/emulated/legacy LD_PRELOAD=/system/lib/libkobofb.so \
+        KOBO_LOG_FILE=/data/local/tmp/android.log KOBO_BINDER_LOG=/data/local/tmp/kobo-binder.log \
+        "$CHROOT_BIN" "$ROOTFS" "$@"
+}
+netboot() {
+    set +e
+    iface=$1; i=0
+    while [ "$i" -lt 150 ] && kill -0 "$container_pid" 2>/dev/null; do
+        [ "$(agp sys.boot_completed)" = 1 ] && break
+        net_write_env "$iface"; sleep 2; i=$((i + 1))
+    done
+    sleep 10
+    # Android-Einstellungen: WLAN an, Installation aus fremden Quellen erlauben (APK aus dem Browser).
+    t=0
+    while [ "$t" -lt 4 ] && kill -0 "$container_pid" 2>/dev/null; do
+        android_run /system/bin/svc wifi enable >> "$BASE/net.log" 2>&1
+        sleep 8
+        [ "$(agp init.svc.wpa_supplicant)" = running ] && break
+        t=$((t + 1))
+    done
+    android_run /system/bin/settings put secure install_non_market_apps 1 >> "$BASE/net.log" 2>&1
+    sleep 25
+    {
+        echo "=== $(date +%T) Host:"; "$BASE/bin/kobo-wpa" --ipinfo "$iface" 2>&1
+        echo "--- resolv.conf:"; cat /etc/resolv.conf 2>&1
+        echo "--- Android-Properties:"
+        for k in init.svc.wpa_supplicant init.svc.dhcpcd_"$iface" wifi.interface dhcp."$iface".result dhcp."$iface".ipaddress \
+                 dhcp."$iface".gateway dhcp."$iface".dns1 net.dns1 net.dns2; do echo "$k=$(agp "$k")"; done
+        echo "--- dumpsys connectivity:"; android_run /system/bin/dumpsys connectivity 2>&1 | head -n 40
+        echo "--- dumpsys wifi:"; android_run /system/bin/dumpsys wifi 2>&1 | head -n 30
+        echo "--- kobo-wpa.log:"; tail -n 40 "$ROOTFS/data/local/tmp/kobo-wpa.log" 2>&1
+        echo "--- kobo-net-guard.log:"; tail -n 20 "$ROOTFS/data/local/tmp/kobo-net-guard.log" 2>&1
+    } > "$BASE/net.txt" 2>&1
+    while kill -0 "$container_pid" 2>/dev/null; do net_write_env "$iface"; sleep 5; done
+}
+netinfo() {
+    iface=$(net_iface)
+    echo "Host-Schnittstelle: $iface"
+    [ ! -x "$BASE/bin/kobo-wpa" ] || "$BASE/bin/kobo-wpa" --ipinfo "$iface" || true
+    echo "DNS (Host): $(awk '$1 == "nameserver" { printf "%s ", $2 }' /etc/resolv.conf 2>/dev/null)"
+    echo "SSID (Host): $(net_ssid "$iface")"
+    if [ -f "$BASE/net.txt" ]; then echo "--- net.txt (Android-Seite, nach dem Boot):"; cat "$BASE/net.txt"; fi
+}
 start_ime_fix() {
     [ -f "$BASE/ime-fix.sh" ] || return 0
     mkdir -p "$ROOTFS/system/etc"
@@ -320,7 +463,7 @@ start_ime_fix() {
 run() {
     root_required
     mkdir "$RUN/lock" 2>/dev/null || fail 'Schon gestartet oder alte Mounts vorhanden; status/recover prüfen.'
-    container_pid='' vnc_pid='' watchdog_pid='' watch_pid='' ime_fix_pid=''
+    container_pid='' vnc_pid='' watchdog_pid='' watch_pid='' ime_fix_pid='' net_pid='' NET_IFACE=''
     trap cleanup EXIT
     trap 'exit 0' INT TERM HUP
     echo $$ > "$RUN/runner.pid"
@@ -343,6 +486,11 @@ run() {
     # Shim-Log vorab anlegen und fuer alle uids beschreibbar machen (SurfaceFlinger laeuft als system)
     : > "$ROOTFS/data/local/tmp/kobo-binder.log"; chmod 0666 "$ROOTFS/data/local/tmp/kobo-binder.log"
     : > "$ROOTFS/data/local/tmp/android.log"; chmod 0666 "$ROOTFS/data/local/tmp/android.log"
+    if [ "${KOBO_NET:-1}" = 1 ]; then
+        NET_IFACE=$(net_iface)
+        net_install "$NET_IFACE" || NET_IFACE=''
+        [ -z "$NET_IFACE" ] || net_write_env "$NET_IFACE"
+    fi
     rm -rf "$ROOTFS/data/tombstones" 2>/dev/null || true; rm -f "$BASE/logcat.txt" "$BASE/tombstone.txt"
     # Replace image-provided dangling proc/sys symlinks with mountpoint dirs.
     # The official image may inherit these links from its emulator product.
@@ -422,6 +570,7 @@ run() {
     echo "$container_pid" > "$RUN/container.pid"
     watchdog & watchdog_pid=$!
     bootwatch & watch_pid=$!
+    if [ -n "$NET_IFACE" ]; then netboot "$NET_IFACE" & net_pid=$!; fi
     touch "$RUN/ready"
     while kill -0 "$container_pid" 2>/dev/null && kill -0 "$vnc_pid" 2>/dev/null; do sleep 1; done
     echo 'Android oder die VNC-Brücke wurde beendet.'
@@ -453,6 +602,7 @@ case "${1:-status}" in
             while running; do i=$((i + 1)); [ "$i" -le 20 ] || fail 'Stopp hängt; keine erzwungenen Unmounts vorgenommen.'; sleep 1; done
         else echo 'Android läuft nicht.'; fi
         ;;
+    netinfo) netinfo ;;
     status)
         if running; then echo 'Android-Prozess läuft (Bootstatus separat prüfen).'; else echo 'Android gestoppt.'; fi
         if mounted "$ROOTFS"; then echo "Rootfs gemountet: $ROOTFS"; fi
@@ -475,5 +625,5 @@ case "${1:-status}" in
         rmdir "$RUN/lock" 2>/dev/null || true
         echo 'Laufzeitzustand bereinigt.'
         ;;
-    *) echo 'Aufruf: sh android.sh {check|stages|start|stop|status|exec BEFEHL...|recover}' >&2; exit 2 ;;
+    *) echo 'Aufruf: sh android.sh {check|stages|start|stop|status|netinfo|exec BEFEHL...|recover}' >&2; exit 2 ;;
 esac

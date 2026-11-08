@@ -84,6 +84,18 @@ def package(root, build, product, dist):
         copy_file(ime_fix, android / 'ime-fix.sh', executable=True)
     for helper in ('kobo-vnc', 'kobo-container'):
         copy_file(product / 'system/bin' / helper, android / 'bin' / helper, executable=True)
+    # WLAN-Bruecke: android.sh kopiert diese Dateien bei jedem Start ins Rootfs, damit auch ein
+    # bestehendes rootfs.img ohne Neuaufbau WLAN bekommt.
+    wpa = product / 'system/bin/kobo-wpa'
+    if wpa.is_file():
+        arm_elf(wpa, static=True)
+        copy_file(wpa, android / 'bin/kobo-wpa', executable=True)
+    shim = product / 'system/lib/libkobofb.so'
+    if shim.is_file():
+        copy_file(shim, android / 'bin/libkobofb.so')
+    cacerts = root / 'runtime/cacerts'
+    if cacerts.is_dir():
+        shutil.copytree(cacerts, android / 'cacerts')
     probe = product / 'system/bin/kobo-probe'
     if probe.is_file():
         arm_elf(probe, static=True)

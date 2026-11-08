@@ -148,11 +148,13 @@ NATIVE="$BUILD/native-arm"
 mkdir -p "$NATIVE"
 COMMON=(--sysroot="$SYSROOT" -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16 -Os -g0 -std=gnu99 -Wall -Wextra -Wformat=2)
 "$CC" "${COMMON[@]}" -fPIC -shared -pthread \
-    "$ROOT/native/kobofb.c" "$ROOT/native/kobo_fb.c" "$ROOT/native/kobo_binder.c" "$ROOT/native/kobo_log.c" \
+    "$ROOT/native/kobofb.c" "$ROOT/native/kobo_fb.c" "$ROOT/native/kobo_binder.c" "$ROOT/native/kobo_log.c" "$ROOT/native/kobo_net.c" \
     -Wl,-soname,libkobofb.so -o "$NATIVE/libkobofb.so"
 "$CC" "${COMMON[@]}" "$ROOT/native/kobo_vnc.c" "$ROOT/native/kobo_fb.c" \
     "$ROOT/native/kobo_input.c" -static -pthread -lm -o "$NATIVE/kobo-vnc"
 "$CC" "${COMMON[@]}" "$ROOT/runtime/kobo-container.c" -static -o "$NATIVE/kobo-container"
+# WLAN-Bruecke: wpa_supplicant-/dhcpcd-Attrappe, die den Host-Zustand an Androids Wi-Fi-Stack spiegelt.
+"$CC" "${COMMON[@]}" "$ROOT/native/kobo_wifi.c" -static -o "$NATIVE/kobo-wpa"
 # KitKat's /sbin/healthd is a STATIC executable: LD_PRELOAD (binder 32->64 bit shim) cannot reach it, so it can
 # never register "batteryproperties" on the Kobo kernel -> BatteryService NPE -> system_server/zygote restart loop.
 # Replace it with a dynamically linked bionic implementation that runs under the shim.
@@ -169,6 +171,7 @@ grep -aF 'proc-mount fallback build 2026-11-02e' "$NATIVE/kobo-container" >/dev/
 sudo install -o root -g root -m 0644 "$NATIVE/libkobofb.so" "$PRODUCT/system/lib/libkobofb.so"
 sudo install -o root -g root -m 0755 "$NATIVE/kobo-vnc" "$PRODUCT/system/bin/kobo-vnc"
 sudo install -o root -g root -m 0755 "$NATIVE/kobo-container" "$PRODUCT/system/bin/kobo-container"
+sudo install -o root -g root -m 0755 "$NATIVE/kobo-wpa" "$PRODUCT/system/bin/kobo-wpa"
 sudo install -o root -g root -m 0755 "$NATIVE/kobo-vold" "$PRODUCT/system/bin/vold"
 sudo mkdir -p "$PRODUCT/root/sbin"
 sudo rm -f "$PRODUCT/root/sbin/healthd"
@@ -181,7 +184,7 @@ EOF
 printf '%s\n' 'Android SDK API 19 KitKat ARM EABI v7a system image' > "$BUILD/AOSP-RELEASE.txt"
 printf '%s\n' 'prebuilt-system-image-sha256:ca7440cade53d829a8cace857cfad9afaa174c286d1b7a5d139e73cfcfde45d7' > "$BUILD/REPO-REVISION.txt"
 cat > "$BUILD/patches.json" <<'EOF'
-{"mode":"prebuilt-sdk-adaptation","changes":["replace emulator init with isolated Kobo init","set low-RAM software-rendered Kobo properties","remove emulator EGL/GLES shims","build Bionic framebuffer and Kobo helpers with NDK r10e","replace static /sbin/healthd with dynamic kobo-healthd (binder shim applies)","add minimal kobo-vold so MountService becomes ready"]}
+{"mode":"prebuilt-sdk-adaptation","changes":["replace emulator init with isolated Kobo init","set low-RAM software-rendered Kobo properties","remove emulator EGL/GLES shims","build Bionic framebuffer and Kobo helpers with NDK r10e","replace static /sbin/healthd with dynamic kobo-healthd (binder shim applies)","add minimal kobo-vold so MountService becomes ready","add kobo-wpa WLAN bridge and host-network guard in libkobofb"]}
 EOF
 cat > "$BUILD/build-container.json" <<'EOF'
 {"mode":"prebuilt-download-and-small-native-build","sdk":"Android KitKat API 19 ARM EABI v7a","ndk":"r10e","aosp-full-source-build":false}

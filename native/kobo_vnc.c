@@ -129,9 +129,33 @@ static int message(int fd, struct format *fmt, struct request *q,
     default: return -1;
     }
 }
+/* Expand RGB565 to 8 bit per channel exactly like the old per-pixel code. */
+static uint8_t expand5[32], expand6[64];
+static void init_expand(void)
+{
+    unsigned i;
+    for(i=0;i<32;++i) expand5[i]=(uint8_t)((i<<3)|(i>>2));
+    for(i=0;i<64;++i) expand6[i]=(uint8_t)((i<<2)|(i>>4));
+}
 static void convert_row(unsigned char *out, const unsigned char *src, unsigned count, const struct format *f)
 {
     unsigned x;
+    /* Fast path 1: client wants the native RGB565 little-endian layout -> plain copy. */
+    if(f->bytes==2 && !f->big && f->rs==11 && f->gs==5 && f->bs==0) { memcpy(out,src,(size_t)count*2); return; }
+    /* Fast path 2: 32 bit true colour (what RFB clients normally ask for). One table
+     * lookup per channel and one 32 bit store instead of a per-byte shuffle loop. */
+    if(f->bytes==4) {
+        uint32_t *o=(uint32_t *)(void *)out; /* out is 4 byte aligned: header is 16 bytes */
+        for(x=0;x<count;++x) {
+            uint32_t value=(uint32_t)src[0] | ((uint32_t)src[1]<<8);
+            uint32_t px=((uint32_t)expand5[(value>>11)&31]<<f->rs) |
+                        ((uint32_t)expand6[(value>>5)&63]<<f->gs) |
+                        ((uint32_t)expand5[value&31]<<f->bs);
+            o[x]=f->big ? __builtin_bswap32(px) : px;
+            src+=2;
+        }
+        return;
+    }
     for(x=0;x<count;++x) {
         uint32_t value=(uint32_t)src[0] | ((uint32_t)src[1]<<8), r=(value>>11)&31, g=(value>>5)&63, b=value&31;
         unsigned j;
@@ -141,35 +165,65 @@ static void convert_row(unsigned char *out, const unsigned char *src, unsigned c
         src+=2; out+=f->bytes;
     }
 }
-static int update(int fd, struct kobo_fb *fb, const struct format *fmt, struct request *q,
-                  unsigned char *last, int *valid, unsigned char *row)
+/* Find the changed region of the request: first/last differing row and, inside it, the
+ * narrowest 4-byte-aligned column span. Narrow rectangles mean fewer bytes on the socket
+ * and, much more importantly, less dithering/refresh work in the KOReader client. */
+static int diff_region(const unsigned char *page, const unsigned char *last, size_t stride,
+                       const struct request *q, unsigned *first, unsigned *end,
+                       unsigned *x0, unsigned *x1)
 {
-    struct kobo_fb_meta m; unsigned y,first=q->y+q->h,end=q->y, stride=fb->meta->width*2;
-    unsigned char header[16]; const unsigned char *page; int64_t deadline;
+    unsigned y; size_t x_start=(size_t)q->x*2, x_end=((size_t)q->x+q->w)*2;
+    size_t lo=x_end, hi=x_start; int any=0;
+    for(y=q->y;y<q->y+q->h;++y) {
+        const unsigned char *a=page+(size_t)y*stride, *b=last+(size_t)y*stride;
+        size_t i=x_start, j=x_end;
+        if(!memcmp(a+x_start,b+x_start,x_end-x_start)) continue;
+        /* Row differs: trim equal 4-byte chunks from both ends (cheap, bounded by row). */
+        while(i+4<=x_end && !memcmp(a+i,b+i,4)) i+=4;
+        while(j>i+4 && !memcmp(a+j-4,b+j-4,4)) j-=4;
+        if(!any) { *first=y; any=1; }
+        *end=y+1;
+        if(i<lo) lo=i;
+        if(j>hi) hi=j;
+    }
+    if(!any) return 0;
+    /* Round to whole pixels and clamp to the request. */
+    *x0=(unsigned)(lo/2); *x1=(unsigned)((hi+1)/2);
+    if(*x0<q->x) *x0=q->x;
+    if(*x1>q->x+q->w) *x1=q->x+q->w;
+    return 1;
+}
+/* out must hold 16 + width*height*4 bytes. All rows of one update leave in ONE send. */
+static int update(int fd, struct kobo_fb *fb, const struct format *fmt, struct request *q,
+                  unsigned char *last, int *valid, unsigned char *out)
+{
+    struct kobo_fb_meta m; unsigned y,first=q->y,end=q->y+q->h,x0=q->x,x1=q->x+q->w;
+    unsigned stride=fb->meta->width*2; const unsigned char *page; int64_t deadline; size_t n;
+    unsigned char *p;
     if(!q->pending)return 0;
     if(kobo_fb_snapshot(fb->meta,&m))return 0;
     if(m.magic!=KOBO_FB_MAGIC || m.abi_version!=KOBO_FB_ABI || m.width!=fb->meta->width ||
        m.height!=fb->meta->height || m.stride!=stride || m.yoffset>m.height) { errno=EINVAL; return -1; }
     page=fb->pixels+(size_t)m.yoffset*stride;
-    if(!q->incremental || !*valid) { first=q->y; end=q->y+q->h; }
-    else for(y=q->y;y<q->y+q->h;++y) {
-        size_t off=(size_t)y*stride+(size_t)q->x*2;
-        if(memcmp(page+off,last+off,(size_t)q->w*2)) { if(first>y)first=y; end=y+1; }
+    if(q->w && q->h && q->incremental && *valid) {
+        if(!diff_region(page,last,stride,q,&first,&end,&x0,&x1)) return 0; /* Defer; continue polling input. */
     }
-    if(q->w && q->h && first>=end)return 0; /* Defer; continue polling input. */
-    deadline=milliseconds()+5000; memset(header,0,sizeof(header));
-    if(!q->w || !q->h) { q->pending=0; return write_until(fd,header,4,deadline); }
-    put16(header+2,1); put16(header+4,q->x); put16(header+6,first);
-    put16(header+8,q->w); put16(header+10,end-first); /* encoding 0: raw */
-    if(write_until(fd,header,sizeof(header),deadline))return -1;
+    deadline=milliseconds()+5000;
+    if(!q->w || !q->h) { unsigned char empty[4]; memset(empty,0,sizeof(empty)); q->pending=0; return write_until(fd,empty,4,deadline); }
+    memset(out,0,16);
+    put16(out+2,1); put16(out+4,x0); put16(out+6,first);
+    put16(out+8,x1-x0); put16(out+10,end-first); /* encoding 0: raw */
+    p=out+16;
     for(y=first;y<end;++y) {
-        size_t off=(size_t)y*stride+(size_t)q->x*2;
-        /* Take one small row snapshot; remember precisely what was transmitted. */
-        memcpy(last+off,page+off,(size_t)q->w*2);
-        convert_row(row,last+off,q->w,fmt);
-        if(write_until(fd,row,(size_t)q->w*fmt->bytes,deadline))return -1;
+        size_t off=(size_t)y*stride+(size_t)x0*2;
+        /* Remember precisely what was transmitted, then convert from that snapshot. */
+        memcpy(last+off,page+off,(size_t)(x1-x0)*2);
+        convert_row(p,last+off,x1-x0,fmt);
+        p+=(size_t)(x1-x0)*fmt->bytes;
     }
-    if(q->x==0 && first==0 && q->w==m.width && end==m.height)*valid=1;
+    n=(size_t)(p-out);
+    if(write_until(fd,out,n,deadline))return -1;
+    if(x0==0 && first==0 && x1==m.width && end==m.height)*valid=1;
     q->pending=0; return 0;
 }
 static void release_keys(struct kobo_input *i)
@@ -187,26 +241,41 @@ static void release_keys(struct kobo_input *i)
         i->keys[code]=0;
     }
 }
+/* A frame is only compared when Android flipped a page (frame_counter/yoffset moved).
+ * Direct mmap writes do not change the counter, so a cheap safety compare still runs
+ * every SAFETY_MS. Before this, the whole 960 KB frame was memcmp'ed up to 1000 times
+ * per second, which stole CPU from SurfaceFlinger and capped Android's own frame rate. */
+#define SAFETY_MS 10
 static int serve_client(int fd,struct kobo_fb *fb,struct kobo_input *input)
 {
-    struct format fmt; struct request q; unsigned char *last,*row; int valid=0,rc=-1;
+    struct format fmt; struct request q; unsigned char *last,*out; int valid=0,rc=-1;
+    uint32_t seen_counter=0,seen_yoffset=0; int64_t last_diff=0; int have_seen=0;
+    size_t out_bytes=16+(size_t)fb->meta->width*fb->meta->height*4;
     default_format(&fmt); memset(&q,0,sizeof(q));
     if(handshake(fd,fb->meta->width,fb->meta->height))return -1;
-    last=calloc(1,fb->bytes/2); row=malloc((size_t)fb->meta->width*4);
-    if(!last || !row) { free(last); free(row); return -1; }
+    last=calloc(1,fb->bytes/2); out=malloc(out_bytes);
+    if(!last || !out) { free(last); free(out); return -1; }
+    { int sb=1<<20; setsockopt(fd,SOL_SOCKET,SO_SNDBUF,&sb,sizeof(sb)); }
     while(!stopping) {
         struct pollfd p; int n; p.fd=fd; p.events=POLLIN; p.revents=0;
-        /* The client issues framebuffer requests frequently; do not add a
-         * fixed 50 ms latency before checking for the next one. */
-        n=poll(&p,1,1);
+        /* Pending request: wake up every 2 ms to notice a page flip. Idle: sleep longer. */
+        n=poll(&p,1,q.pending?2:20);
         if(n<0) { if(errno==EINTR)continue; break; }
         if(n>0) {
             if(!(p.revents&POLLIN))break;
             if(message(fd,&fmt,&q,input,fb->meta->width,fb->meta->height,&valid))break;
         }
-        if(update(fd,fb,&fmt,&q,last,&valid,row))break;
+        if(q.pending) {
+            struct kobo_fb_meta m; int64_t now=milliseconds(); int run=1;
+            if(q.incremental && valid && !kobo_fb_snapshot(fb->meta,&m)) {
+                int moved=!have_seen || m.frame_counter!=seen_counter || m.yoffset!=seen_yoffset;
+                if(moved) { seen_counter=m.frame_counter; seen_yoffset=m.yoffset; have_seen=1; }
+                run=moved || now-last_diff>=SAFETY_MS;
+            }
+            if(run) { last_diff=now; if(update(fd,fb,&fmt,&q,last,&valid,out))break; }
+        }
     }
-    free(last); free(row); release_keys(input); return rc;
+    free(last); free(out); release_keys(input); return rc;
 }
 static void usage(FILE *f)
 {
@@ -246,6 +315,7 @@ int main(int argc,char **argv)
     }
     if(check) { if(no_input)goto bad; return kobo_probe(); }
     if(!dir || (!no_input && !input_dir) || (no_input && input_dir))goto bad;
+    init_expand();
     signal(SIGINT,stop_signal); signal(SIGTERM,stop_signal); signal(SIGPIPE,SIG_IGN);
     if(mkdir(dir,0755)<0 && errno!=EEXIST) { perror("shared directory"); goto done; }
     if(kobo_fb_create(dir,w,h,&fb)) { perror("framebuffer initialization"); goto done; }

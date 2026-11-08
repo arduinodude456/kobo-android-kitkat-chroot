@@ -24,7 +24,7 @@ Das SDK-Systemimage bleibt ein generischer Emulator-Userspace und kein Kobo-ROM.
 
 Die Android-Anzeige bleibt bei 600 × 800 Pixeln und RGB565 mit zwei Bildseiten. Die VNC-Brücke benötigt keine externe VNC-Bibliothek. KOReader zeigt das Bild ohne zusätzliche Desktop-Umgebung an. Niedrige Dalvik-Heap-Limits, Low-RAM-Einstellungen, deaktivierte Animationen und eine reduzierte Grafik-Konfiguration sollen unnötige Last begrenzen.
 
-Damit ist Android aber nicht auf wenige Megabyte reduziert: Zygote, Systemserver, SurfaceFlinger, notwendige Framework-Dienste und Apps benötigen weiterhin Speicher. Es gibt keine Garantie gegen Speicherknappheit bei parallel laufendem Nickel/KOReader. E-Ink begrenzt die wahrnehmbare Bildrate; schnelle Spiele und flüssiges Video sind kein Ziel.
+Damit ist Android aber nicht auf wenige Megabyte reduziert: Zygote, Systemserver, SurfaceFlinger, notwendige Framework-Dienste und Apps benötigen weiterhin Speicher. Es gibt keine Garantie gegen Speicherknappheit bei parallel laufendem Nickel/KOReader. E-Ink begrenzt die wahrnehmbare Bildrate; schnelle Spiele und flüssiges Video sind kein Ziel. Der Bildpfad ist auf möglichst hohe Bildrate getrimmt (siehe „Bildrate“ in [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md)); 10 FPS sind auf dem Gerät noch nicht gemessen.
 
 ## Auf dem Kobo starten
 
@@ -43,11 +43,15 @@ sh android.sh stop
 
 `sys.boot_completed` muss schließlich `1` ergeben. Ein offener VNC-Port oder sichtbares Bild allein ist kein vollständiger Bootnachweis. Vor USB-Datenträgermodus oder Firmware-Update Android unbedingt stoppen. Vollständige Installation, APK-Sideloading, Logs und Fehlerbehebung stehen in [docs/KOBO.md](docs/KOBO.md).
 
+## WLAN, Browser und App-Downloads
+
+Android nutzt das WLAN des Kobo (Browser, Downloads, APK-Installation). Einrichtung und Fehlersuche: [docs/WLAN.md](docs/WLAN.md).
+
 ## Voraussetzungen und Sicherheit
 
 Erforderlich sind Root-Rechte, ein Binder-Treiber mit von der Shim-Library unterstützter ABI, Ashmem, `uinput`, Loop-Geräte und ext4. Der Starter verwendet PID-/Mount-Namespaces, wenn der Kernel sie unterstützt. Auf älteren Kobo-Kerneln ist standardmäßig ein weniger isolierter Chroot-Fallback aktiv; dabei teilen Android und Kobo Mount- und PID-Namespace. Keine unpassenden Kernelmodule laden und keine Kernel- oder Firmwarepartitionen überschreiben.
 
-VNC lauscht nur auf `127.0.0.1:5963`. Die echten Kobo-Touch- und Framebuffer-Geräte werden nicht in Android eingebunden. Im Namespace-Fallback teilen Android-Prozesse zusätzlich Mount- und PID-Namespace mit dem Host; ein Fehler kann dann den Kobo beeinflussen. Android teilt sich immer Kernel und Netzwerkstack mit dem Host. KitKat ist veraltet und unsicher für untrusted Apps; nur mit vertrauenswürdigen Apps und ausgeschaltetem WLAN experimentieren und keine persönlichen Konten einrichten. Vor dem ersten Test ein Backup anlegen. Belegte Hardwaregrenzen stehen in [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md).
+VNC lauscht nur auf `127.0.0.1:5963`. Die echten Kobo-Touch- und Framebuffer-Geräte werden nicht in Android eingebunden. Im Namespace-Fallback teilen Android-Prozesse zusätzlich Mount- und PID-Namespace mit dem Host; ein Fehler kann dann den Kobo beeinflussen. Android teilt sich immer Kernel und Netzwerkstack mit dem Host. KitKat ist veraltet und unsicher für untrusted Apps; nur mit vertrauenswürdigen Apps experimentieren (WLAN-Brücke abschaltbar mit `KOBO_NET=0`, siehe [docs/WLAN.md](docs/WLAN.md)) und keine persönlichen Konten einrichten. Vor dem ersten Test ein Backup anlegen. Belegte Hardwaregrenzen stehen in [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md).
 
 ## Lokale Prüfungen
 

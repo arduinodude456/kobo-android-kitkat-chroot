@@ -12,6 +12,17 @@ Der generische Android-KitKat-4.4-Gralloc-Treiber öffnet `/dev/graphics/fb0` be
 
 Der lokale VNC-Endpunkt verwendet keine Authentifizierung. Das ist nur wegen der festen Loopback-Bindung vertretbar. Andere lokale Prozesse auf dem Kobo können sich trotzdem verbinden. Es wird kein Port für WLAN-Clients geöffnet.
 
+## Bildrate (Performance-Pfad)
+
+Der Weg Android → Bild auf dem E-Ink hat vier Stufen; jede war einzeln ein Engpass:
+
+1. **Android/Shim:** `FBIO_WAITFORVSYNC` wartet nur 1 ms, jeder Seitenwechsel erhöht `frame_counter`.
+2. **`kobo-vnc`:** vergleicht nur noch, wenn sich `frame_counter`/`yoffset` geändert haben (plus eine billige Sicherheitsprüfung alle 10 ms für direkte mmap-Schreiber). Früher wurde der komplette 960-KB-Frame bis zu 1000-mal pro Sekunde verglichen und nahm SurfaceFlinger CPU weg. Ein Update geht als **ein** `send()` hinaus (statt einem pro Zeile) und enthält nur die geänderten Zeilen **und Spalten** (4-Byte-genau). RGB565 wird ohne Umrechnung kopiert, 32 bpp über Tabellen.
+3. **Lua-Client:** fordert RGB565 an (halbe Datenmenge), leert den Socket pro Tick vollständig in einen festen ffi-Puffer (früher max. 128 KB pro 50 ms und quadratisches String-Anhängen/-Abschneiden) und dithert **nur den geänderten Bereich** über eine Tabelle RGB565 → 8-Farben-Pixel in einen Canvas. `paintTo` kopiert nur noch Zeilen per `memcpy`.
+4. **E-Ink:** `setDirty` bekommt nur noch den geänderten Ausschnitt. Wie schnell das Panel diesen Ausschnitt tatsächlich aktualisiert, bestimmt der Kobo-Treiber; das ist die verbleibende harte Grenze.
+
+Host-Messung (x86, nur relative Aussage): Vollbild über den VNC-Server 274 → 849 Frames/s, Teilupdates ca. 4× schneller und rund 3× weniger Daten; Lua-Empfang eines Vollbilds 30 → 1,3 ms, Dither 8 → 3 ms. Die Zahlen auf dem Kobo (Cortex-A53, Software-Rendering in Android) liegen deutlich niedriger und sind noch nicht gemessen.
+
 ## Prozess- und Dateisystemgrenzen
 
 `android.sh` mountet zunächst unter seinem eigenen `run/`-Verzeichnis: das ext4-Image und kleine temporäre Dateisysteme für Geräte und Bilddaten. `kobo-container` verwendet private Mount- und PID-Namespaces, wenn der Kernel sie anbietet. Auf älteren Kobo-Kerneln ist standardmäßig ein weniger isolierter Chroot-Fallback aktiviert; dann teilen Android und der Host Mount- und PID-Namespace. Dieser Fallback ist absichtlich kein Sicherheitsboundary und kann bei Abstürzen oder fehlerhaften Mounts den Kobo-Host beeinflussen.
