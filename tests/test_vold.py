@@ -15,6 +15,9 @@ int main(void) {
     CK(kv_reply("7", o, sizeof o) > 0); CK(!strcmp(o, "200 7 Command succeeded"));
     CK(kv_reply("abc volume list", o, sizeof o) == 0);
     CK(kv_reply("", o, sizeof o) == 0);
+    CK(kv_volume_line("1 volume list", "/storage/emulated/legacy", o, sizeof o) > 0);
+    CK(!strcmp(o, "110 1 sdcard /storage/emulated/legacy 4"));
+    CK(kv_volume_line("1 volume list", "nope", o, sizeof o) == 0);
     puts("ok"); return 0;
 }'''
 @unittest.skipUnless(CC, "gcc fehlt")

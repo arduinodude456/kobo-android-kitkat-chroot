@@ -537,6 +537,9 @@ run() {
     mkdir -p "$PUBLIC_SHARED" "$ROOTFS/storage/emulated/0"
     chmod 0777 "$PUBLIC_SHARED"
     mount -o bind "$PUBLIC_SHARED" "$ROOTFS/storage/emulated/0" || fail "Gemeinsamer Speicher konnte nicht gemountet werden: $PUBLIC_SHARED"
+    # EXTERNAL_STORAGE zeigt auf /storage/emulated/legacy: ohne diesen Bind landen Apps in einem leeren Ordner.
+    mkdir -p "$ROOTFS/storage/emulated/legacy"
+    mount -o bind "$PUBLIC_SHARED" "$ROOTFS/storage/emulated/legacy" || fail "Gemeinsamer Speicher (legacy) konnte nicht gemountet werden: $PUBLIC_SHARED"
     if [ "${KOBO_PROBE:-0}" = 1 ]; then
         # Harmloser Test: nur ein Android-Shell-Befehl im Chroot, KEIN init, kein zygote.
         echo "PROBE: chroot + /system/bin/sh (ohne init)"

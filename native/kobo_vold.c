@@ -8,8 +8,8 @@
  * verbunden und "volume list" beantwortet bekommen hat -> Boot bleibt vor dem Homescreen haengen.
  *
  * Protokoll (NativeDaemonConnector): Kommando "<seq> <cmd> [args]\0",
- * Antwort "<code> <seq> <text>\0". Wir melden keine Volumes und quittieren jedes Kommando
- * mit 200 (Command okay). Primaerer Speicher ist /data/media bzw. emuliert, kein Wechselmedium.
+ * Antwort "<code> <seq> <text>\0". Wir melden das emulierte Primaer-Volume (EXTERNAL_STORAGE) als Mounted (110-Zeile)
+ * und quittieren jedes Kommando mit 200 (Command okay).
  */
 #include <stddef.h>
 #include <stdio.h>
@@ -27,6 +27,20 @@ size_t kv_reply(const char *cmd, char *out, size_t cap)
     return (size_t)n;
 }
 
+/* Eine "volume list"-Zeile: "110 <seq> <label> <pfad> <state>", state 4 = Mounted (VolumeState.Mounted).
+ * Ohne diese Zeilen kennt MountService keinen Status -> getExternalStorageState() = "removed"
+ * -> Chrome/Editor: "No SD card", Schreiben schlaegt fehl. */
+size_t kv_volume_line(const char *cmd, const char *path, char *out, size_t cap)
+{
+    char seq[24]; size_t i = 0; int n;
+    while (cmd[i] && cmd[i] != ' ' && i < sizeof seq - 1) { if (cmd[i] < '0' || cmd[i] > '9') return 0; seq[i] = cmd[i]; i++; }
+    if (i == 0 || !path || path[0] != '/') return 0;
+    seq[i] = 0;
+    n = snprintf(out, cap, "110 %s sdcard %s 4", seq, path);
+    if (n < 0 || (size_t)n >= cap) return 0;
+    return (size_t)n;
+}
+
 #ifndef KOBO_VOLD_TEST
 #include <errno.h>
 #include <fcntl.h>
@@ -35,6 +49,29 @@ size_t kv_reply(const char *cmd, char *out, size_t cap)
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
+
+#define KV_MAX_VOL 4
+static char vols[KV_MAX_VOL][128]; static int nvols;
+
+/* Pfade aus /system/etc/kobo-vold.volumes (eine pro Zeile), sonst EXTERNAL_STORAGE, sonst Default. */
+static void load_volumes(void)
+{
+    FILE *f = fopen("/system/etc/kobo-vold.volumes", "r");
+    char line[128];
+    if (f) {
+        while (nvols < KV_MAX_VOL && fgets(line, sizeof line, f)) {
+            size_t l = strlen(line);
+            while (l && (line[l-1] == '\n' || line[l-1] == '\r' || line[l-1] == ' ')) line[--l] = 0;
+            if (line[0] == '/') strcpy(vols[nvols++], line);
+        }
+        fclose(f);
+    }
+    if (!nvols) {
+        const char *e = getenv("EXTERNAL_STORAGE");
+        strncpy(vols[0], (e && e[0] == '/') ? e : "/storage/emulated/legacy", sizeof vols[0] - 1);
+        nvols = 1;
+    }
+}
 
 static void handle(int c)
 {
@@ -46,7 +83,15 @@ static void handle(int c)
         len += (size_t)r;
         for (i = 0; i < len; i++) {
             if (buf[i] == 0) {
-                char rep[96]; size_t n = kv_reply(buf + start, rep, sizeof rep - 1);
+                char rep[160]; size_t n; int v;
+                const char *cmd = buf + start; size_t sl = 0;
+                while (cmd[sl] >= '0' && cmd[sl] <= '9') sl++;
+                if (sl && strncmp(cmd + sl, " volume list", 12) == 0)
+                    for (v = 0; v < nvols; v++) {
+                        n = kv_volume_line(cmd, vols[v], rep, sizeof rep - 1);
+                        if (n) { rep[n] = 0; if (write(c, rep, n + 1) < 0) return; }
+                    }
+                n = kv_reply(cmd, rep, sizeof rep - 1);
                 if (n) { rep[n] = 0; if (write(c, rep, n + 1) < 0) return; }
                 start = i + 1;
             }
@@ -59,6 +104,7 @@ static void handle(int c)
 int main(void)
 {
     int s = -1;
+    load_volumes();
     const char *env = getenv("ANDROID_SOCKET_vold");
     if (env) s = atoi(env);                       /* von init ("socket vold ...") angelegt */
     if (s < 0) {                                  /* Fallback: selbst anlegen */
