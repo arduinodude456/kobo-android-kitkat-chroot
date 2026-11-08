@@ -219,15 +219,24 @@ static void kw_schedule(struct kw *w, int kind, long delay_ms)
     w->nev++;
 }
 
+/*
+ * KitKat-WifiMonitor ordnet Ereignisse OHNE "IFNAME=<iface> " dem p2p0-Monitor zu (nicht wlan0);
+ * der echte Supplicant haengt das Praefix an. Deshalb: "<3>IFNAME=wlan0 CTRL-EVENT-...".
+ */
 static void kw_emit(struct kw *w, const char *text)
 {
     int i;
-    size_t len = strlen(text);
+    char buf[640];
+    size_t len;
+    if (!strncmp(text, "<3>", 3)) snprintf(buf, sizeof buf, "<3>IFNAME=%s %s", w->iface, text + 3);
+    else snprintf(buf, sizeof buf, "IFNAME=%s %s", w->iface, text);
+    len = strlen(buf);
     for (i = 0; i < KW_MAX_MON; i++) {
         if (!w->mon[i].used) continue;
-        if (sendto(w->socks[w->mon[i].sock], text, len, MSG_DONTWAIT, (struct sockaddr *)&w->mon[i].addr, w->mon[i].len) < 0 &&
-            (errno == ECONNREFUSED || errno == ENOENT || errno == ENOTCONN))
-            w->mon[i].used = 0;          /* Monitor ist weg */
+        if (sendto(w->socks[w->mon[i].sock], buf, len, MSG_DONTWAIT, (struct sockaddr *)&w->mon[i].addr, w->mon[i].len) < 0) {
+            kw_log("Ereignis senden an Monitor %d: %s", i, strerror(errno));
+            if (errno == ECONNREFUSED || errno == ENOENT || errno == ENOTCONN) w->mon[i].used = 0;   /* Monitor ist weg */
+        }
     }
 }
 
@@ -313,6 +322,12 @@ static size_t kw_command(struct kw *w, int si, const struct sockaddr_un *from, s
     char enc[300];
     int n = 0;
 
+    /* KitKat sendet jeden Befehl als "IFNAME=wlan0 <Befehl>" (Multi-Interface-Supplicant). */
+    if (!strncmp(cmd, "IFNAME=", 7)) {
+        const char *sp = strchr(cmd, ' ');
+        cmd = sp ? sp + 1 : "";
+        while (*cmd == ' ') cmd++;
+    }
     if (has_word(cmd, "PING")) {
         n = snprintf(out, cap, "PONG\n");
     } else if (has_word(cmd, "ATTACH")) {
@@ -368,6 +383,15 @@ static size_t kw_command(struct kw *w, int si, const struct sockaddr_un *from, s
         n = snprintf(out, cap, "bssid / frequency / signal level / flags / ssid\n");
         if (w->link_up && n > 0 && (size_t)n < cap)
             n += snprintf(out + n, cap - (size_t)n, "%s\t%d\t%d\t[ESS]\t%s\n", KW_FAKE_BSSID, KW_FREQ, KW_RSSI, enc);
+    } else if (has_word(cmd, "BSS")) {
+        /* KitKat: "BSS RANGE=<sid>- MASK=..." liefert Eintraege ab id sid; leere Antwort beendet die Schleife. */
+        const char *r = strstr(cmd, "RANGE=");
+        int sid = r ? atoi(r + 6) : (cmd[3] == ' ' ? atoi(cmd + 4) : 0);
+        kw_encode_ssid(w->ssid, enc, sizeof enc);
+        if (w->link_up && sid <= 0)
+            n = snprintf(out, cap, "id=0\nbssid=%s\nfreq=%d\nlevel=%d\ntsf=0\nflags=[ESS]\nssid=%s\n====\n",
+                         KW_FAKE_BSSID, KW_FREQ, KW_RSSI, enc);
+        else n = 0;
     } else if (has_word(cmd, "SCAN")) {
         kw_schedule(w, EV_SCAN, 200);
         n = snprintf(out, cap, "OK\n");
@@ -560,7 +584,7 @@ static int kw_supplicant(const char *iface)
                     if (strncasecmp(cmd, "PING", 4) && strncasecmp(cmd, "SIGNAL_POLL", 11) && strncasecmp(cmd, "STATUS", 6))
                         kw_log("Kommando (%s): %s", w->paths[si], cmd);
                     rl = kw_command(w, si, &from, fl, cmd, rep, sizeof rep);
-                    if (fl > (socklen_t)sizeof(sa_family_t) && rl)
+                    if (fl > (socklen_t)sizeof(sa_family_t))
                         if (sendto(w->socks[si], rep, rl, MSG_DONTWAIT, (struct sockaddr *)&from, fl) < 0)
                             kw_log("Antwort an Client fehlgeschlagen: %s", strerror(errno));
                 }

@@ -69,12 +69,25 @@ class WifiBridge(unittest.TestCase):
                 self.assertIn("Test Net", self.ask(ctrl, "SCAN_RESULTS"))
                 self.assertEqual(self.ask(ctrl, "SET_NETWORK 0 ssid x"), "OK\n")
                 self.assertEqual(self.ask(ctrl, "P2P_FIND"), "FAIL\n")
+                # KitKat sendet alle Befehle mit "IFNAME=<iface> " davor
+                self.assertEqual(self.ask(ctrl, "IFNAME=lo PING"), "PONG\n")
+                self.assertTrue(self.ask(ctrl, "IFNAME=lo DRIVER MACADDR").startswith("Macaddr = "))
+                self.assertEqual(self.ask(ctrl, "IFNAME=lo SET device_name x"), "OK\n")
+                self.assertEqual(self.ask(ctrl, "IFNAME=lo RECONNECT"), "OK\n")
+                self.assertIn("wpa_state=COMPLETED", self.ask(ctrl, "IFNAME=lo STATUS"))
+                self.assertEqual(self.ask(ctrl, 'IFNAME=lo GET_NETWORK 0 ssid'), '"Test Net"\n')
+                bss = self.ask(ctrl, "IFNAME=lo BSS RANGE=0- MASK=0x21987")
+                self.assertIn("\nssid=Test Net\n====\n", bss); self.assertIn("level=-45", bss)
+                ctrl.send(b"IFNAME=lo BSS RANGE=1- MASK=0x21987")
+                self.assertEqual(ctrl.recv(4096), b"")       # leere Antwort muss trotzdem kommen
                 # Monitor: nach ATTACH muss der Verbindungszustand nachgeliefert werden.
                 self.assertEqual(self.ask(mon, "ATTACH"), "OK\n")
                 seen = ""
                 while "CTRL-EVENT-CONNECTED" not in seen:
                     seen += mon.recv(4096).decode()
                 self.assertIn("state=9", seen)
+                # ohne IFNAME-Praefix wuerde KitKat die Ereignisse dem p2p0-Monitor geben
+                self.assertIn("<3>IFNAME=lo CTRL-EVENT-STATE-CHANGE", seen); self.assertIn("<3>IFNAME=lo CTRL-EVENT-CONNECTED", seen)
                 # Format, das WifiMonitor.mConnectedEventPattern verlangt
                 m = re.search(r"((?:[0-9a-f]{2}:){5}[0-9a-f]{2}) .* \[id=([0-9]+) ", seen.split("CONNECTED")[1].replace(" - Connection to", ""))
                 self.assertTrue(m, seen)
