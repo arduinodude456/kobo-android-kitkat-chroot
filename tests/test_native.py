@@ -167,6 +167,52 @@ class NativeTests(unittest.TestCase):
             self.assertEqual((Path(td) / "fb.bin").stat().st_size, 8 * 6 * 4)
             self.assertEqual((Path(td) / "fb.bin").read_bytes()[:2], b"\x1f\x00")
 
+    PERF_HELPER = r"""
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+int __android_log_print(int prio, const char *tag, const char *fmt, ...);
+int main(void) {
+    int p[2], a, b, c;
+    if (pipe(p)) return 2;
+    errno = 0; a = fsync(p[0]); b = fdatasync(p[0]);
+    errno = 0; c = fsync(-1);
+    printf("%d %d %d %d\n", a, b, c, errno == EBADF);
+    __android_log_print(4, "T", "info %d", 1);
+    __android_log_print(3, "T", "debug %d", 2);
+    __android_log_print(6, "T", "error %d", 3);
+    return 0;
+}
+"""
+
+    def run_perf(self, extra):
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "perf.c"
+            src.write_text(self.PERF_HELPER)
+            exe = Path(td) / "perf"
+            subprocess.run(["cc", "-std=gnu99", "-w", str(src), "-L" + str(self.build), "-lkobofb", "-Wl,-rpath," + str(self.build), "-o", str(exe)], check=True, capture_output=True)
+            log = Path(td) / "android.log"
+            env = dict(os.environ, LD_PRELOAD=str(self.build / "libkobofb.so"), KOBO_LOG_FILE=str(log), **extra)
+            run = subprocess.run([str(exe)], env=env, capture_output=True)
+            self.assertEqual(run.returncode, 0, run.stderr.decode())
+            return run.stdout.decode().split(), (log.read_text() if log.exists() else "")
+
+    def test_fsync_is_noop_by_default_but_keeps_ebadf(self):
+        out, _ = self.run_perf({})
+        self.assertEqual(out, ["0", "0", "-1", "1"])      # fsync(pipe) sonst EINVAL; fsync(-1) bleibt EBADF
+        out, _ = self.run_perf({"KOBO_NOSYNC": "0"})
+        self.assertEqual(out[:3], ["-1", "-1", "-1"])      # echter Syscall: Pipe nicht synchronisierbar
+
+    def test_log_level_filter_and_persistent_descriptor(self):
+        _, log = self.run_perf({})
+        self.assertIn("I/T(", log); self.assertIn("E/T(", log)
+        self.assertNotIn("debug 2", log)
+        _, log = self.run_perf({"KOBO_LOG_LEVEL": "3"})
+        self.assertIn("debug 2", log)
+        _, log = self.run_perf({"KOBO_LOG_LEVEL": "6"})
+        self.assertNotIn("info 1", log); self.assertIn("error 3", log)
+
     def test_dimensions_reject_bad_environment(self):
         for width in ("0", "4097", "-1", "8junk", ""):
             with self.subTest(width=width), tempfile.TemporaryDirectory() as td:

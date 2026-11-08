@@ -119,7 +119,7 @@ on fs
     # emits this event after filesystems are ready. In the chroot, system/data
     # are already mounted by the Kobo supervisor, so reproduce the framework trigger.
     setprop debug.sf.nobootanimation 0
-    setprop dalvik.vm.dexopt-flags v=n,o=n
+    setprop dalvik.vm.dexopt-flags v=r,o=v
     setprop ro.crypto.state unencrypted
     trigger nonencrypted
 

@@ -9,6 +9,7 @@
 #include "kobo_fb.h"
 #include "kobo_binder.h"
 #include "kobo_net.h"
+#include "kobo_log.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/fb.h>
@@ -53,6 +54,16 @@
 #ifndef SYS_ioctl
 #ifdef __NR_ioctl
 #define SYS_ioctl __NR_ioctl
+#endif
+#endif
+#ifndef SYS_fsync
+#ifdef __NR_fsync
+#define SYS_fsync __NR_fsync
+#endif
+#endif
+#ifndef SYS_fdatasync
+#ifdef __NR_fdatasync
+#define SYS_fdatasync __NR_fdatasync
 #endif
 #endif
 #ifndef FBIO_WAITFORVSYNC
@@ -156,6 +167,27 @@ static int fake_fd(int fd)
         match = 1;
     errno = saved; return match;
 }
+/* fsync()/fdatasync() sind auf dem Chroot-Image extrem teuer: ext4-Journal in einer Datei auf FAT32, jeder
+ * Aufruf zieht Journal-Commit und Flush bis zur eMMC nach sich. Android ruft sie staendig auf (SQLite, AtomicFile
+ * in system_server, Package-/Settings-Dateien). Standard: Erfolg melden, ohne zu warten. Datenverlust ist nur
+ * bei hartem Stromausfall moeglich (ext4 commit-Intervall); "android.sh stop" synchronisiert normal.
+ * Abschalten: KOBO_NOSYNC=0 (config). Ein ungueltiger Deskriptor liefert weiter EBADF. */
+static int nosync_mode = -1;
+static int nosync(void)
+{
+    if (nosync_mode < 0) nosync_mode = kobo_tunable("KOBO_NOSYNC", 1) != 0;
+    return nosync_mode;
+}
+int fsync(int fd)
+{
+    if (nosync()) return fcntl(fd, F_GETFD) < 0 ? -1 : 0;
+    return (int)syscall(SYS_fsync, fd);
+}
+int fdatasync(int fd)
+{
+    if (nosync()) return fcntl(fd, F_GETFD) < 0 ? -1 : 0;
+    return (int)syscall(SYS_fdatasync, fd);
+}
 static void varinfo(struct fb_var_screeninfo *v)
 {
     memset(v, 0, sizeof(*v));
@@ -201,7 +233,10 @@ int ioctl(int fd, unsigned long request, ...)
     if (kobo_net_blocks((unsigned long)request, arg)) return 0;
     /* KitKat API 19 userspace speaks the 32 bit binder ABI, the kernel the 64 bit one. */
     if (kobo_binder_wants((uint32_t)request)) return (int)kobo_binder_ioctl(fd, (unsigned long)request, arg, raw_ioctl);
-    if (!fake_fd(fd)) return (int)syscall(SYS_ioctl, fd, request, arg);
+    /* Framebuffer-ioctls haben den Typ 'F' (0x46xx). Alles andere (ashmem, binder-fremde, tty, FIONREAD ...)
+     * geht ohne die beiden Zusatz-Syscalls (fstat+stat) aus fake_fd() direkt zum Kernel. */
+    if ((((uint32_t)request >> 8) & 0xff) != 'F' || !fake_fd(fd))
+        return (int)syscall(SYS_ioctl, fd, request, arg);
     if (initialize() < 0) return -1;
     switch ((unsigned long)request) {
     case FBIOGET_VSCREENINFO:

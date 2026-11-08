@@ -24,7 +24,7 @@ Das SDK-Systemimage bleibt ein generischer Emulator-Userspace und kein Kobo-ROM.
 
 Die Android-Anzeige bleibt bei 600 × 800 Pixeln und RGB565 mit zwei Bildseiten. Die VNC-Brücke benötigt keine externe VNC-Bibliothek. KOReader zeigt das Bild ohne zusätzliche Desktop-Umgebung an. Niedrige Dalvik-Heap-Limits, Low-RAM-Einstellungen, deaktivierte Animationen und eine reduzierte Grafik-Konfiguration sollen unnötige Last begrenzen.
 
-Damit ist Android aber nicht auf wenige Megabyte reduziert: Zygote, Systemserver, SurfaceFlinger, notwendige Framework-Dienste und Apps benötigen weiterhin Speicher. Es gibt keine Garantie gegen Speicherknappheit bei parallel laufendem Nickel/KOReader. E-Ink begrenzt die wahrnehmbare Bildrate; schnelle Spiele und flüssiges Video sind kein Ziel. Der Bildpfad ist auf möglichst hohe Bildrate getrimmt (siehe „Bildrate“ in [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md)); 10 FPS sind auf dem Gerät noch nicht gemessen.
+Damit ist Android aber nicht auf wenige Megabyte reduziert: Zygote, Systemserver, SurfaceFlinger, notwendige Framework-Dienste und Apps benötigen weiterhin Speicher. Es gibt keine Garantie gegen Speicherknappheit bei parallel laufendem Nickel/KOReader. E-Ink begrenzt die wahrnehmbare Bildrate; schnelle Spiele und flüssiges Video sind kein Ziel. Der Bildpfad ist auf möglichst hohe Bildrate getrimmt (siehe „Bildrate“ in [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md)); 10 FPS sind auf dem Gerät noch nicht gemessen. Maßnahmen gegen Langsamkeit (fsync, Mountoptionen, CPU-Governor, Dalvik-Dexopt, Logging) und ihre Schalter stehen in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ## Auf dem Kobo starten
 

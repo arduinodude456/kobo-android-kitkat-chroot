@@ -349,7 +349,12 @@ function View:setupCanvas(rfb)
 end
 function View:pollAndroid()
     if self.closed then return end
-    local delay=0.03
+    -- Adaptiver Takt: kurz nach einem Bildwechsel oder einer Eingabe schnell pollen, im Leerlauf
+    -- (stehendes E-Ink-Bild) nur noch etwa 8x pro Sekunde. Der feste 30-ms-Takt weckte KOReader 33x/s
+    -- und stahl dem Single-Core-Gespann Android+KOReader CPU.
+    local delay=0.12
+    local t0=socket.gettime()
+    if t0 < (self.active_until or 0) then delay=0.03 end
     if not self.rfb then
         local rfb=RFB.connect()
         if rfb then
@@ -370,6 +375,7 @@ function View:pollAndroid()
                 if dx0 then region=Geom:new{x=self.ox+dx0,y=self.oy+dy0,w=dx1-dx0,h=dy1-dy0} end
             end
             delay=0.01
+            self.active_until=socket.gettime()+1.0
         end
         local now=socket.gettime()
         if now >= (self.next_full_refresh or now+30) then
@@ -383,8 +389,19 @@ function View:pollAndroid()
     end
     UIManager:scheduleIn(delay,self.tick)
 end
+function View:boost(seconds)
+    local now=socket.gettime()
+    local was_idle = now >= (self.active_until or 0)
+    self.active_until=now+(seconds or 1.5)
+    -- Der naechste Leerlauf-Tick kann bis zu 120 ms entfernt sein: bei Eingabe sofort vorziehen.
+    if was_idle and self.tick and self.rfb and not self.closed then
+        UIManager:unschedule(self.tick)
+        UIManager:scheduleIn(0.01,self.tick)
+    end
+end
 function View:pulse(key)
     if not self.rfb then return end
+    self:boost(2)
     local r=self.rfb; local ok,err=pcall(r.key,r,key,true)
     if not ok then self:fail(tostring(err)); return end
     local cb
@@ -417,6 +434,7 @@ function View:onAndroidGesture(_,ges)
     if self.closed then return true end
     local pos=ges.pos
     if not pos then return true end
+    self:boost(1.5)
     local kind=ges.ges
     if kind=="tap" then
         for _,b in ipairs(self.buttons) do
