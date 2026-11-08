@@ -387,6 +387,11 @@ net_install() {
     printf '<?xml version="1.0" encoding="utf-8"?>\n<permissions>\n    <feature name="android.hardware.wifi" />\n</permissions>\n' > "$ROOTFS/system/etc/permissions/kobo-wifi.xml"
     chmod 0644 "$ROOTFS/system/etc/permissions/kobo-wifi.xml"
     mkdir -p "$ROOTFS/data/misc/wifi/sockets" "$ROOTFS/data/misc/dhcp"
+    # KitKat sucht den Supplicant-Socket in IFACE_DIR=/data/system/wpa_supplicant (existiert das Verzeichnis)
+    # bzw. /dev/socket/<iface>, NICHT in data/misc/wifi/sockets. kobo-wpa lauscht auf allen Pfaden.
+    mkdir -p "$ROOTFS/data/system/wpa_supplicant"
+    chown 1010:1010 "$ROOTFS/data/system/wpa_supplicant" 2>/dev/null || true
+    chmod 0771 "$ROOTFS/data/system/wpa_supplicant" 2>/dev/null || true
     chown 1010:1010 "$ROOTFS/data/misc/wifi" "$ROOTFS/data/misc/wifi/sockets" 2>/dev/null || true
     chmod 0770 "$ROOTFS/data/misc/wifi" "$ROOTFS/data/misc/wifi/sockets" 2>/dev/null || true
     chown 1014:1000 "$ROOTFS/data/misc/dhcp" 2>/dev/null || true
@@ -435,8 +440,17 @@ netboot() {
         for k in init.svc.wpa_supplicant init.svc.dhcpcd_"$iface" wifi.interface dhcp."$iface".result dhcp."$iface".ipaddress \
                  dhcp."$iface".gateway dhcp."$iface".dns1 net.dns1 net.dns2; do echo "$k=$(agp "$k")"; done
         echo "--- dumpsys connectivity:"; android_run /system/bin/dumpsys connectivity 2>&1 | head -n 40
-        echo "--- dumpsys wifi:"; android_run /system/bin/dumpsys wifi 2>&1 | head -n 30
-        echo "--- kobo-wpa.log:"; tail -n 40 "$ROOTFS/data/local/tmp/kobo-wpa.log" 2>&1
+        echo "--- dumpsys wifi:"; android_run /system/bin/dumpsys wifi 2>&1 | head -n 140
+        echo "--- Probe (oeffnet den Kontrollsocket wie system_server, uid 1000):"
+        android_run /system/bin/kobo-wpa --probe "$iface" 2>&1
+        echo "--- ls -ln Socket-Verzeichnisse:"
+        for d in data/system/wpa_supplicant data/misc/wifi data/misc/wifi/sockets dev/socket; do
+            echo "[$d]"; ls -ln "$ROOTFS/$d" 2>&1 | head -n 30
+        done
+        echo "--- ps (kobo-wpa):"; ps 2>/dev/null | grep '[k]obo-wpa'
+        echo "--- Android-Log (wifi/wpa/dhcp/netd), letzte 100 Zeilen:"
+        grep -i 'wifi\|wpa\|supplicant\|dhcp\|WifiHW\|NetworkManagement' "$ROOTFS/data/local/tmp/android.log" 2>&1 | tail -n 100
+        echo "--- kobo-wpa.log:"; tail -n 60 "$ROOTFS/data/local/tmp/kobo-wpa.log" 2>&1
         echo "--- kobo-net-guard.log:"; tail -n 20 "$ROOTFS/data/local/tmp/kobo-net-guard.log" 2>&1
     } > "$BASE/net.txt" 2>&1
     while kill -0 "$container_pid" 2>/dev/null; do net_write_env "$iface"; sleep 5; done

@@ -13,6 +13,7 @@
  *   kobo-wpa --dhcp IFACE         dhcpcd-Attrappe: liest IP/Gateway/DNS des Hosts und setzt die
  *                                 Properties dhcp.<iface>.*, die libnetutils erwartet
  *   kobo-wpa --ipinfo IFACE       Diagnose: gibt die erkannten Host-Daten aus
+ *   kobo-wpa --probe IFACE        Diagnose: oeffnet den Kontrollsocket wie system_server (uid 1000)
  *
  * Der Host (KOReader/Nickel) bleibt allein zustaendig fuer Verbinden, Passwort und Roaming.
  * Dieses Programm veraendert nie Adressen, Routen oder Schnittstellen.
@@ -22,6 +23,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <linux/sockios.h>
 #include <net/if.h>
 #include <netinet/in.h>
@@ -43,6 +45,7 @@
 #include <unistd.h>
 
 #define KW_MAX_MON 8
+#define KW_MAX_SOCK 4
 #define KW_MAX_EV 12
 #define KW_AID_WIFI 1010
 #define KW_FAKE_BSSID "02:4b:6f:00:00:01"
@@ -57,7 +60,7 @@ struct kw_link {
     char mac[18];
 };
 
-struct kw_mon { struct sockaddr_un addr; socklen_t len; int used; };
+struct kw_mon { struct sockaddr_un addr; socklen_t len; int used; int sock; };
 struct kw_ev { long long due; int kind; };
 
 struct kw {
@@ -73,6 +76,9 @@ struct kw {
     struct kw_link link;
     struct kw_mon mon[KW_MAX_MON];
     struct kw_ev ev[KW_MAX_EV];
+    int socks[KW_MAX_SOCK];    /* ein Socket je Pfad, unter dem Android den Supplicant suchen koennte */
+    char paths[KW_MAX_SOCK][220];
+    int nsock;
     int nev;
     long long last_sync;
 };
@@ -213,19 +219,19 @@ static void kw_schedule(struct kw *w, int kind, long delay_ms)
     w->nev++;
 }
 
-static void kw_emit(struct kw *w, int sock, const char *text)
+static void kw_emit(struct kw *w, const char *text)
 {
     int i;
     size_t len = strlen(text);
     for (i = 0; i < KW_MAX_MON; i++) {
         if (!w->mon[i].used) continue;
-        if (sendto(sock, text, len, MSG_DONTWAIT, (struct sockaddr *)&w->mon[i].addr, w->mon[i].len) < 0 &&
+        if (sendto(w->socks[w->mon[i].sock], text, len, MSG_DONTWAIT, (struct sockaddr *)&w->mon[i].addr, w->mon[i].len) < 0 &&
             (errno == ECONNREFUSED || errno == ENOENT || errno == ENOTCONN))
             w->mon[i].used = 0;          /* Monitor ist weg */
     }
 }
 
-static void kw_do_event(struct kw *w, int sock, int kind)
+static void kw_do_event(struct kw *w, int kind)
 {
     char enc[300], msg[512];
     switch (kind) {
@@ -233,27 +239,27 @@ static void kw_do_event(struct kw *w, int sock, int kind)
         if (!w->visible) return;
         kw_encode_ssid(w->ssid, enc, sizeof enc);
         snprintf(msg, sizeof msg, "<3>CTRL-EVENT-STATE-CHANGE id=0 state=9 BSSID=%s SSID=%s", KW_FAKE_BSSID, enc);
-        kw_emit(w, sock, msg);
+        kw_emit(w, msg);
         snprintf(msg, sizeof msg, "<3>CTRL-EVENT-CONNECTED - Connection to %s completed [id=0 id_str=]", KW_FAKE_BSSID);
-        kw_emit(w, sock, msg);
+        kw_emit(w, msg);
         w->last_sync = now_ms();
         kw_log("Ereignis: verbunden (%s)", w->ssid);
         break;
     case EV_DISC:
         snprintf(msg, sizeof msg, "<3>CTRL-EVENT-DISCONNECTED bssid=%s reason=3", KW_FAKE_BSSID);
-        kw_emit(w, sock, msg);
-        kw_emit(w, sock, "<3>CTRL-EVENT-STATE-CHANGE id=-1 state=0 BSSID=00:00:00:00:00:00");
+        kw_emit(w, msg);
+        kw_emit(w, "<3>CTRL-EVENT-STATE-CHANGE id=-1 state=0 BSSID=00:00:00:00:00:00");
         kw_log("Ereignis: getrennt");
         break;
     case EV_SCAN:
-        kw_emit(w, sock, "<3>CTRL-EVENT-SCAN-RESULTS ");
+        kw_emit(w, "<3>CTRL-EVENT-SCAN-RESULTS ");
         break;
     default:
         break;
     }
 }
 
-static void kw_run_events(struct kw *w, int sock)
+static void kw_run_events(struct kw *w)
 {
     int i = 0;
     long long t = now_ms();
@@ -262,7 +268,7 @@ static void kw_run_events(struct kw *w, int sock)
             int kind = w->ev[i].kind;
             memmove(&w->ev[i], &w->ev[i + 1], (size_t)(w->nev - i - 1) * sizeof w->ev[0]);
             w->nev--;
-            kw_do_event(w, sock, kind);
+            kw_do_event(w, kind);
         } else i++;
     }
 }
@@ -301,7 +307,7 @@ static int has_word(const char *cmd, const char *word)
 }
 
 /* Erzeugt die Antwort auf ein wpa_ctrl-Kommando. */
-static size_t kw_command(struct kw *w, const struct sockaddr_un *from, socklen_t fromlen, const char *cmd,
+static size_t kw_command(struct kw *w, int si, const struct sockaddr_un *from, socklen_t fromlen, const char *cmd,
                          char *out, size_t cap)
 {
     char enc[300];
@@ -312,11 +318,12 @@ static size_t kw_command(struct kw *w, const struct sockaddr_un *from, socklen_t
     } else if (has_word(cmd, "ATTACH")) {
         int i, slot = -1;
         for (i = 0; i < KW_MAX_MON; i++) {
-            if (w->mon[i].used && w->mon[i].len == fromlen && !memcmp(&w->mon[i].addr, from, fromlen)) { slot = i; break; }
+            if (w->mon[i].used && w->mon[i].sock == si && w->mon[i].len == fromlen &&
+                !memcmp(&w->mon[i].addr, from, fromlen)) { slot = i; break; }
             if (!w->mon[i].used && slot < 0) slot = i;
         }
         if (slot < 0) slot = 0;                       /* aeltesten Monitor ersetzen */
-        w->mon[slot].addr = *from; w->mon[slot].len = fromlen; w->mon[slot].used = 1;
+        w->mon[slot].addr = *from; w->mon[slot].len = fromlen; w->mon[slot].used = 1; w->mon[slot].sock = si;
         kw_log("Monitor angemeldet");
         /* WifiStateMachine ist erst kurz nach dem Anmelden bereit: Zustand nachliefern. */
         w->last_sync = 0;
@@ -325,7 +332,8 @@ static size_t kw_command(struct kw *w, const struct sockaddr_un *from, socklen_t
     } else if (has_word(cmd, "DETACH")) {
         int i;
         for (i = 0; i < KW_MAX_MON; i++)
-            if (w->mon[i].used && w->mon[i].len == fromlen && !memcmp(&w->mon[i].addr, from, fromlen)) w->mon[i].used = 0;
+            if (w->mon[i].used && w->mon[i].sock == si && w->mon[i].len == fromlen &&
+                !memcmp(&w->mon[i].addr, from, fromlen)) w->mon[i].used = 0;
         n = snprintf(out, cap, "OK\n");
     } else if (has_word(cmd, "TERMINATE")) {
         w->quit = 1;
@@ -406,6 +414,36 @@ static const char *kw_dir(void)
     return d && *d ? d : "/data/misc/wifi/sockets";
 }
 
+/*
+ * KitKat (libhardware_legacy wifi.c, wifi_connect_to_supplicant) sucht den Kontrollsocket des
+ * PRIMAeren Interfaces NICHT in /data/misc/wifi/sockets (das gilt nur fuer Zweit-Schnittstellen und
+ * ab Android 5), sondern
+ *   - existiert IFACE_DIR = /data/system/wpa_supplicant:  IFACE_DIR/<iface>
+ *   - sonst der Name <iface> ohne "/": wpa_ctrl_open macht daraus /dev/socket/<iface>.
+ * Die Attrappe lauscht deshalb auf allen diesen Pfaden (und legt IFACE_DIR an, damit KitKat den
+ * absoluten Pfad nimmt). Mit gesetztem KOBO_WPA_DIR (Tests) gibt es die Zusatzpfade nur ueber
+ * KOBO_WPA_ALT_DIR / KOBO_WPA_INIT_DIR, damit Tests nie den Host anfassen.
+ */
+static const char *kw_alt_dir(void)
+{
+    const char *d = getenv("KOBO_WPA_ALT_DIR");
+    if (d) return *d ? d : NULL;
+    return getenv("KOBO_WPA_DIR") ? NULL : "/data/system/wpa_supplicant";
+}
+
+static const char *kw_init_dir(void)
+{
+    const char *d = getenv("KOBO_WPA_INIT_DIR");
+    if (d) return *d ? d : NULL;
+    return getenv("KOBO_WPA_DIR") ? NULL : "/dev/socket";
+}
+
+static const char *kw_client_dir(void)
+{
+    const char *d = getenv("KOBO_WPA_CLIENT_DIR");
+    return d && *d ? d : "/data/misc/wifi/sockets";
+}
+
 static const char *kw_envfile(void)
 {
     const char *d = getenv("KOBO_NET_ENV");
@@ -426,12 +464,40 @@ static int kw_mkdirs(const char *path)
     return 0;
 }
 
+/* Bindet einen Kontrollsocket. Rueckgabe: Socket oder -1 (Grund im Log). */
+static int kw_bind_ctrl(const char *dir, const char *name, char *path, size_t cap, int mkdir_dir)
+{
+    struct sockaddr_un a;
+    int sock;
+    if (mkdir_dir) {
+        if (kw_mkdirs(dir) < 0) { kw_log("Verzeichnis %s: %s", dir, strerror(errno)); return -1; }
+        if (chown(dir, KW_AID_WIFI, KW_AID_WIFI) < 0) { /* nur als root moeglich; Tests laufen ohne */ }
+        chmod(dir, 0771);
+    }
+    snprintf(path, cap, "%s/%s", dir, name);
+    if (strlen(path) >= sizeof a.sun_path) { kw_log("Socket-Pfad zu lang: %s", path); return -1; }
+    unlink(path);
+    sock = kw_socket(AF_UNIX, SOCK_DGRAM);
+    if (sock < 0) return -1;
+    memset(&a, 0, sizeof a);
+    a.sun_family = AF_UNIX;
+    memcpy(a.sun_path, path, strlen(path));
+    if (bind(sock, (struct sockaddr *)&a, sizeof a) < 0) {
+        kw_log("bind %s: %s", path, strerror(errno));
+        close(sock);
+        return -1;
+    }
+    if (chown(path, KW_AID_WIFI, KW_AID_WIFI) < 0) { /* siehe oben */ }
+    chmod(path, 0660);
+    return sock;
+}
+
 static int kw_supplicant(const char *iface)
 {
     struct kw *w = calloc(1, sizeof *w);
-    struct sockaddr_un a;
-    char path[220];
-    int sock;
+    char path[220], wname[IFNAMSIZ + 8];
+    const char *alt, *idir;
+    int s;
     long long next_tick = 0;
     unsigned ticks = 0;
 
@@ -441,52 +507,63 @@ static int kw_supplicant(const char *iface)
     snprintf(w->envfile, sizeof w->envfile, "%s", kw_envfile());
     w->next_net = 1;
     umask(0);
-    if (kw_mkdirs(w->dir) < 0) { kw_log("Verzeichnis %s: %s", w->dir, strerror(errno)); return 1; }
-    if (chown(w->dir, KW_AID_WIFI, KW_AID_WIFI) < 0) { /* nur als root moeglich; Tests laufen ohne */ }
-    chmod(w->dir, 0770);
-    snprintf(path, sizeof path, "%s/%s", w->dir, iface);
-    unlink(path);
-    sock = kw_socket(AF_UNIX, SOCK_DGRAM);
-    if (sock < 0) return 1;
-    memset(&a, 0, sizeof a);
-    a.sun_family = AF_UNIX;
-    if (strlen(path) >= sizeof a.sun_path) { kw_log("Socket-Pfad zu lang: %s", path); return 1; }
-    memcpy(a.sun_path, path, strlen(path));
-    if (bind(sock, (struct sockaddr *)&a, sizeof a) < 0) { kw_log("bind %s: %s", path, strerror(errno)); return 1; }
-    if (chown(path, KW_AID_WIFI, KW_AID_WIFI) < 0) { /* siehe oben */ }
-    chmod(path, 0660);
     signal(SIGPIPE, SIG_IGN);
-    kw_log("Supplicant-Attrappe laeuft: %s, Host-Schnittstelle %s", path, iface);
+    alt = kw_alt_dir();
+    idir = kw_init_dir();
+    /* 1. KitKat-Primaerpfad: IFACE_DIR/<iface> (Verzeichnis anlegen -> Android waehlt diesen Zweig) */
+    if (alt && (s = kw_bind_ctrl(alt, iface, path, sizeof path, 1)) >= 0) {
+        w->socks[w->nsock] = s; snprintf(w->paths[w->nsock++], sizeof w->paths[0], "%s", path);
+    }
+    /* 2. Pfad der Zweit-Schnittstellen / aelterer Bruecken-Staende */
+    if ((s = kw_bind_ctrl(w->dir, iface, path, sizeof path, 1)) >= 0) {
+        w->socks[w->nsock] = s; snprintf(w->paths[w->nsock++], sizeof w->paths[0], "%s", path);
+    }
+    /* 3. Namen ohne "/": /dev/socket/<iface> (falls IFACE_DIR fehlt) und wpa_<iface> (Android 5) */
+    if (idir) {
+        snprintf(wname, sizeof wname, "wpa_%s", iface);
+        if (w->nsock < KW_MAX_SOCK && (s = kw_bind_ctrl(idir, iface, path, sizeof path, 0)) >= 0) {
+            w->socks[w->nsock] = s; snprintf(w->paths[w->nsock++], sizeof w->paths[0], "%s", path);
+        }
+        if (w->nsock < KW_MAX_SOCK && (s = kw_bind_ctrl(idir, wname, path, sizeof path, 0)) >= 0) {
+            w->socks[w->nsock] = s; snprintf(w->paths[w->nsock++], sizeof w->paths[0], "%s", path);
+        }
+    }
+    if (!w->nsock) { kw_log("kein Kontrollsocket gebunden"); return 1; }
+    for (s = 0; s < w->nsock; s++) kw_log("Supplicant-Attrappe laeuft: %s, Host-Schnittstelle %s", w->paths[s], iface);
     /* Ereignisse ohne angemeldeten Monitor gehen ins Leere; ATTACH liefert den Zustand nach. */
     kw_refresh(w, 1);
 
     while (!w->quit) {
-        struct pollfd p = { sock, POLLIN, 0 };
+        struct pollfd p[KW_MAX_SOCK];
         long long t = now_ms();
-        int timeout = 1000, i;
+        int timeout = 1000, i, si;
+        for (si = 0; si < w->nsock; si++) { p[si].fd = w->socks[si]; p[si].events = POLLIN; p[si].revents = 0; }
         for (i = 0; i < w->nev; i++) {
             long long d = w->ev[i].due - t;
             if (d < 0) d = 0;
             if (d < timeout) timeout = (int)d;
         }
-        if (poll(&p, 1, timeout) > 0 && (p.revents & POLLIN)) {
-            for (;;) {
-                char cmd[512], rep[2048];
-                struct sockaddr_un from;
-                socklen_t fl = sizeof from;
-                ssize_t r;
-                size_t rl;
-                memset(&from, 0, sizeof from);
-                r = recvfrom(sock, cmd, sizeof cmd - 1, MSG_DONTWAIT, (struct sockaddr *)&from, &fl);
-                if (r < 0) break;
-                cmd[r] = 0;
-                while (r > 0 && (cmd[r - 1] == '\n' || cmd[r - 1] == '\r')) cmd[--r] = 0;
-                if (strncasecmp(cmd, "PING", 4) && strncasecmp(cmd, "SIGNAL_POLL", 11) && strncasecmp(cmd, "STATUS", 6))
-                    kw_log("Kommando: %s", cmd);
-                rl = kw_command(w, &from, fl, cmd, rep, sizeof rep);
-                if (fl > (socklen_t)sizeof(sa_family_t) && rl)
-                    if (sendto(sock, rep, rl, MSG_DONTWAIT, (struct sockaddr *)&from, fl) < 0)
-                        kw_log("Antwort an Client fehlgeschlagen: %s", strerror(errno));
+        if (poll(p, (nfds_t)w->nsock, timeout) > 0) {
+            for (si = 0; si < w->nsock; si++) {
+                if (!(p[si].revents & POLLIN)) continue;
+                for (;;) {
+                    char cmd[512], rep[2048];
+                    struct sockaddr_un from;
+                    socklen_t fl = sizeof from;
+                    ssize_t r;
+                    size_t rl;
+                    memset(&from, 0, sizeof from);
+                    r = recvfrom(w->socks[si], cmd, sizeof cmd - 1, MSG_DONTWAIT, (struct sockaddr *)&from, &fl);
+                    if (r < 0) break;
+                    cmd[r] = 0;
+                    while (r > 0 && (cmd[r - 1] == '\n' || cmd[r - 1] == '\r')) cmd[--r] = 0;
+                    if (strncasecmp(cmd, "PING", 4) && strncasecmp(cmd, "SIGNAL_POLL", 11) && strncasecmp(cmd, "STATUS", 6))
+                        kw_log("Kommando (%s): %s", w->paths[si], cmd);
+                    rl = kw_command(w, si, &from, fl, cmd, rep, sizeof rep);
+                    if (fl > (socklen_t)sizeof(sa_family_t) && rl)
+                        if (sendto(w->socks[si], rep, rl, MSG_DONTWAIT, (struct sockaddr *)&from, fl) < 0)
+                            kw_log("Antwort an Client fehlgeschlagen: %s", strerror(errno));
+                }
             }
         }
         t = now_ms();
@@ -494,14 +571,93 @@ static int kw_supplicant(const char *iface)
             next_tick = t + 1000;
             kw_refresh(w, (++ticks % 5) == 0);
         }
-        kw_run_events(w, sock);
+        kw_run_events(w);
     }
     /* Antwort auf TERMINATE ist raus; Android erwartet danach das Ende-Ereignis. */
-    kw_emit(w, sock, "<3>CTRL-EVENT-TERMINATING - signal 15 received");
-    unlink(path);
-    close(sock);
+    kw_emit(w, "<3>CTRL-EVENT-TERMINATING - signal 15 received");
+    for (s = 0; s < w->nsock; s++) { unlink(w->paths[s]); close(w->socks[s]); }
     kw_log("Supplicant-Attrappe beendet");
     free(w);
+    return 0;
+}
+
+/*
+ * --probe IFACE: Selbsttest ohne Android-Logs. Verhaelt sich wie wifi_connect_to_supplicant +
+ * wpa_ctrl_open aus system_server (uid 1000, Gruppe wifi): waehlt den Pfad wie KitKat, bindet einen
+ * Client-Socket in /data/misc/wifi/sockets, verbindet und sendet PING. Gibt je Kandidat den
+ * genauen errno aus -- damit zeigt net.txt, ob es an Pfad oder Rechten liegt.
+ */
+static void kw_probe_one(const char *label, const char *dest)
+{
+    struct sockaddr_un l, d;
+    char cpath[220], buf[64];
+    struct pollfd p;
+    int s;
+    ssize_t r;
+    s = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (s < 0) { printf("probe %s %s: socket: %s\n", label, dest, strerror(errno)); return; }
+    memset(&l, 0, sizeof l);
+    l.sun_family = AF_UNIX;
+    snprintf(cpath, sizeof l.sun_path, "%s/kobo_probe_%d", kw_client_dir(), (int)getpid());
+    memcpy(l.sun_path, cpath, strlen(cpath) + 1);
+    unlink(cpath);
+    if (bind(s, (struct sockaddr *)&l, sizeof l) < 0) {
+        printf("probe %s %s: Client-bind %s: %s\n", label, dest, cpath, strerror(errno)); close(s); return;
+    }
+    memset(&d, 0, sizeof d);
+    d.sun_family = AF_UNIX;
+    if (strlen(dest) >= sizeof d.sun_path) { printf("probe %s %s: Pfad zu lang\n", label, dest); close(s); return; }
+    memcpy(d.sun_path, dest, strlen(dest) + 1);
+    if (connect(s, (struct sockaddr *)&d, sizeof d) < 0) {
+        printf("probe %s %s: connect: %s\n", label, dest, strerror(errno));
+    } else if (send(s, "PING", 4, 0) < 0) {
+        printf("probe %s %s: send: %s\n", label, dest, strerror(errno));
+    } else {
+        p.fd = s; p.events = POLLIN; p.revents = 0;
+        if (poll(&p, 1, 1500) > 0 && (r = recv(s, buf, sizeof buf - 1, 0)) > 0) {
+            buf[r] = 0;
+            while (r > 0 && (buf[r - 1] == '\n' || buf[r - 1] == '\r')) buf[--r] = 0;
+            printf("probe %s %s: OK (Antwort %s)\n", label, dest, buf);
+        } else printf("probe %s %s: keine Antwort\n", label, dest);
+    }
+    close(s);
+    unlink(cpath);
+}
+
+static int kw_probe(const char *iface)
+{
+    pid_t pid = fork();
+    int status = 0;
+    if (pid < 0) return 1;
+    if (pid == 0) {
+        gid_t groups[1] = { KW_AID_WIFI };
+        char path[220];
+        const char *alt = kw_alt_dir(), *idir = kw_init_dir();
+        if (geteuid() == 0) {
+            if (setgroups(1, groups) < 0 || setgid(1000) < 0 || setuid(1000) < 0) {
+                printf("probe: Rechte auf uid 1000/gid wifi senken fehlgeschlagen: %s\n", strerror(errno));
+                _exit(1);
+            }
+        }
+        printf("probe: uid=%d gid=%d\n", (int)getuid(), (int)getgid());
+        if (alt) {
+            snprintf(path, sizeof path, "%s/%s", alt, iface);
+            printf("probe: IFACE_DIR %s %s -> KitKat nimmt %s\n", alt, access(alt, F_OK) == 0 ? "vorhanden" : "FEHLT",
+                   access(alt, F_OK) == 0 ? path : "/dev/socket/<iface>");
+            kw_probe_one("IFACE_DIR", path);
+        }
+        snprintf(path, sizeof path, "%s/%s", kw_dir(), iface);
+        kw_probe_one("misc/wifi/sockets", path);
+        if (idir) {
+            snprintf(path, sizeof path, "%s/%s", idir, iface);
+            kw_probe_one("dev/socket", path);
+            snprintf(path, sizeof path, "%s/wpa_%s", idir, iface);
+            kw_probe_one("dev/socket/wpa_", path);
+        }
+        fflush(stdout);
+        _exit(0);
+    }
+    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) { }
     return 0;
 }
 
@@ -597,7 +753,8 @@ int main(int argc, char **argv)
     if (!strcmp(mode, "--supplicant")) return kw_supplicant(iface);
     if (!strcmp(mode, "--dhcp")) return kw_dhcp(iface);
     if (!strcmp(mode, "--ipinfo")) return kw_ipinfo(iface);
-    fputs("Aufruf: kobo-wpa --supplicant|--dhcp|--ipinfo IFACE\n", stderr);
+    if (!strcmp(mode, "--probe")) return kw_probe(iface);
+    fputs("Aufruf: kobo-wpa --supplicant|--dhcp|--ipinfo|--probe IFACE\n", stderr);
     return 2;
 }
 #endif

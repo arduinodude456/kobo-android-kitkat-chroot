@@ -93,6 +93,60 @@ class WifiBridge(unittest.TestCase):
             finally:
                 if p.poll() is None: p.kill()
 
+    def test_kitkat_socket_paths(self):
+        """KitKat sucht IFACE_DIR/<iface> bzw. /dev/socket/<iface>; dort muss die Attrappe antworten,
+        und Ereignisse muessen ueber denselben Socket zurueckkommen (connected-Datagramm-Socket)."""
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t)
+            e = self.env(d)
+            e.update(KOBO_WPA_ALT_DIR=str(d / "iface_dir"), KOBO_WPA_INIT_DIR=str(d / "devsock"))
+            (d / "devsock").mkdir()
+            p = subprocess.Popen([str(self.exe), "--supplicant", "lo"], env=e)
+            try:
+                paths = [d / "iface_dir" / "lo", d / "sock" / "lo", d / "devsock" / "lo", d / "devsock" / "wpa_lo"]
+                for _ in range(50):
+                    if all(x.exists() for x in paths): break
+                    time.sleep(0.1)
+                for i, path in enumerate(paths):
+                    self.assertTrue(path.exists(), path)
+                    ctrl, mon = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM), socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+                    for k, c in enumerate((ctrl, mon)):
+                        c.bind(str(d / ("k%d_%d" % (i, k)))); c.connect(str(path)); c.settimeout(5)
+                    self.assertEqual(self.ask(ctrl, "PING"), "PONG\n", path)
+                    self.assertEqual(self.ask(mon, "ATTACH"), "OK\n")
+                    seen = ""
+                    while "CTRL-EVENT-CONNECTED" not in seen:
+                        seen += mon.recv(4096).decode()
+                    ctrl.close(); mon.close()
+                self.assertTrue(os.stat(d / "iface_dir").st_mode & 0o111)
+                self.assertEqual(self.ask(self.client(d, "last"), "TERMINATE"), "OK\n")
+                self.assertEqual(p.wait(timeout=5), 0)
+                for path in paths: self.assertFalse(path.exists(), path)
+            finally:
+                if p.poll() is None: p.kill()
+
+    @unittest.skipUnless(os.geteuid() == 0, "--probe senkt Rechte auf uid 1000, braucht root")
+    def test_probe_selftest(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t)
+            os.chmod(d, 0o755)
+            e = self.env(d)
+            e.update(KOBO_WPA_ALT_DIR=str(d / "iface_dir"), KOBO_WPA_INIT_DIR="", KOBO_WPA_CLIENT_DIR=str(d / "cli"))
+            (d / "cli").mkdir(); os.chmod(d / "cli", 0o777)
+            p = subprocess.Popen([str(self.exe), "--supplicant", "lo"], env=e)
+            try:
+                for _ in range(50):
+                    if (d / "iface_dir" / "lo").exists(): break
+                    time.sleep(0.1)
+                os.chmod(d / "sock", 0o755)
+                r = subprocess.run([str(self.exe), "--probe", "lo"], env=e, capture_output=True, text=True, timeout=20)
+                self.assertIn("uid=1000", r.stdout)
+                self.assertIn("IFACE_DIR %s vorhanden" % (d / "iface_dir"), r.stdout)
+                self.assertIn("iface_dir/lo: OK (Antwort PONG)", r.stdout)
+                self.assertIn("misc/wifi/sockets", r.stdout)
+            finally:
+                p.kill(); p.wait()
+
     def test_dhcp_properties(self):
         with tempfile.TemporaryDirectory() as t:
             d = Path(t)
@@ -152,7 +206,8 @@ class NetGuard(unittest.TestCase):
 class RuntimeIntegration(unittest.TestCase):
     def test_android_sh_wires_bridge(self):
         s = (ROOT / "runtime/android.sh").read_text()
-        for needle in ("patch_net_rc", "KOBO_NET_BEGIN", "svc wifi enable", "install_non_market_apps", "netinfo"):
+        for needle in ("patch_net_rc", "KOBO_NET_BEGIN", "svc wifi enable", "install_non_market_apps", "netinfo",
+                       "data/system/wpa_supplicant", "kobo-wpa --probe"):
             self.assertIn(needle, s)
         subprocess.run(["sh", "-n", str(ROOT / "runtime/android.sh")], check=True)
 
