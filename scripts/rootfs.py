@@ -79,7 +79,7 @@ def prepare(product, stage):
         shutil.rmtree(stage / 'system')
     shutil.copytree(product / 'system', stage / 'system', symlinks=True)
     for name in ('dev', 'dev/socket', 'dev/pts', 'dev/kobo', 'dev/input', 'proc', 'sys',
-                 'data', 'cache', 'mnt', 'storage', 'storage/emulated', 'storage/emulated/0'):
+                 'data', 'cache', 'mnt', 'storage', 'storage/emulated', 'storage/emulated/0', 'storage/sdcard'):
         mountpoint = stage / name
         if mountpoint.is_symlink() or mountpoint.is_file():
             mountpoint.unlink()

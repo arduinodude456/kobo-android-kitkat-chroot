@@ -68,7 +68,7 @@ static void load_volumes(void)
     }
     if (!nvols) {
         const char *e = getenv("EXTERNAL_STORAGE");
-        strncpy(vols[0], (e && e[0] == '/') ? e : "/storage/emulated/legacy", sizeof vols[0] - 1);
+        strncpy(vols[0], (e && e[0] == '/') ? e : "/storage/sdcard", sizeof vols[0] - 1);
         nvols = 1;
     }
 }
