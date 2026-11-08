@@ -15,6 +15,13 @@ KOBO_BINDER_DEVICE=${KOBO_BINDER_DEVICE:-/dev/binder}
 KOBO_ASHMEM_DEVICE=${KOBO_ASHMEM_DEVICE:-/dev/ashmem}
 KOBO_ALLOW_UNSAFE_NO_NAMESPACES=${KOBO_ALLOW_UNSAFE_NO_NAMESPACES:-1}
 export KOBO_BINDER_DEVICE KOBO_ASHMEM_DEVICE KOBO_ALLOW_UNSAFE_NO_NAMESPACES
+# Leistungs-Schalter (siehe docs/PERFORMANCE.md); alle standardmaessig an.
+KOBO_PERF_CPU=${KOBO_PERF_CPU:-1}            # CPU-Governor "performance" solange Android laeuft
+KOBO_PERF_MOUNT=${KOBO_PERF_MOUNT:-1}        # ext4: data=writeback,barrier=0,commit=60
+KOBO_NOSYNC=${KOBO_NOSYNC:-1}                # fsync/fdatasync in Android-Prozessen ohne Warten
+KOBO_LOG_LEVEL=${KOBO_LOG_LEVEL:-4}          # 3 = Debug (ausfuehrlich, langsamer), 4 = Info, 5 = Warnungen
+KOBO_DEXOPT_REBUILD=${KOBO_DEXOPT_REBUILD:-1} # Dalvik-Cache einmalig mit Optimierung neu aufbauen
+KOBO_DIAG_INTERVAL=${KOBO_DIAG_INTERVAL:-15} # Sekunden zwischen Diagnose-Schnappschuessen nach dem Boot
 mkdir -p "$RUN"
 fail() { echo "Android: $*" >&2; exit 1; }
 root_required() { [ "$(id -u)" = 0 ] || fail 'Root erforderlich (aus KOReader starten).'; }
@@ -125,6 +132,97 @@ unmount_tree() {
     awk -v r="$ROOTFS" 'index($2, r) == 1 { print "  " $2 }' /proc/mounts >&2
     return 1
 }
+# ---- Leistung ---------------------------------------------------------------------------------------
+# Das Image liegt als ext4-Datei auf FAT32. Standard-Journal (data=ordered, Barrieren) loest bei jedem
+# fsync/Commit einen Flush bis zur eMMC aus. Aeltere Kernel/busybox lehnen unbekannte Optionen ab.
+rootfs_mount() {
+    if [ "${KOBO_PERF_MOUNT:-1}" = 1 ]; then
+        if mount -t ext4 -o loop,noatime,nodiratime,nosuid,data=writeback,barrier=0,commit=60 "$BASE/rootfs.img" "$ROOTFS" 2>/dev/null; then
+            echo "Rootfs: Performance-Mountoptionen aktiv (writeback, barrier=0, commit=60)"
+            return 0
+        fi
+        echo "Hinweis: Performance-Mountoptionen nicht moeglich, nutze Standardoptionen."
+    fi
+    mount -t ext4 -o loop,noatime,nosuid "$BASE/rootfs.img" "$ROOTFS"
+}
+# CPU auf "performance": Der Kobo taktet im Leerlauf/Powersave sehr niedrig, Android ist CPU-gebunden
+# (Software-Rendering, Dalvik). Alter Zustand wird gemerkt und beim Beenden wiederhergestellt.
+cpu_perf_on() {
+    [ "${KOBO_PERF_CPU:-1}" = 1 ] || return 0
+    saved="$RUN/cpu.saved"; : > "$saved"
+    for c in /sys/devices/system/cpu/cpu[0-9]*; do
+        [ -d "$c" ] || continue
+        if [ -w "$c/online" ]; then { echo 1 > "$c/online"; } 2>/dev/null || true; fi
+        gov="$c/cpufreq/scaling_governor"
+        [ -w "$gov" ] || continue
+        cur=$(cat "$gov" 2>/dev/null) || cur=''
+        minf=$(cat "$c/cpufreq/scaling_min_freq" 2>/dev/null) || minf=''
+        echo "$c|$cur|$minf" >> "$saved"
+        if grep -qw performance "$c/cpufreq/scaling_available_governors" 2>/dev/null; then
+            { echo performance > "$gov"; } 2>/dev/null || true
+        elif [ -w "$c/cpufreq/scaling_min_freq" ] && [ -r "$c/cpufreq/scaling_max_freq" ]; then
+            { cat "$c/cpufreq/scaling_max_freq" > "$c/cpufreq/scaling_min_freq"; } 2>/dev/null || true
+        fi
+        echo "CPU $(basename "$c"): Governor ${cur:-?} -> $(cat "$gov" 2>/dev/null), min $(cat "$c/cpufreq/scaling_min_freq" 2>/dev/null) kHz"
+    done
+    return 0
+}
+cpu_perf_off() {
+    saved="$RUN/cpu.saved"
+    [ -f "$saved" ] || return 0
+    while IFS='|' read -r c gov minf; do
+        [ -n "$c" ] || continue
+        if [ -n "$minf" ]; then { echo "$minf" > "$c/cpufreq/scaling_min_freq"; } 2>/dev/null || true; fi
+        if [ -n "$gov" ]; then { echo "$gov" > "$c/cpufreq/scaling_governor"; } 2>/dev/null || true; fi
+    done < "$saved"
+    rm -f "$saved"
+    return 0
+}
+# Schluessel=Wert in einer Property-Datei setzen (ersetzt vorhandene, haengt sonst an). Kein Regex noetig.
+set_prop_file() {
+    f=$1; k=$2; v=$3
+    [ -f "$f" ] || return 0
+    tmp="$RUN/prop.new"
+    awk -v k="$k" -v v="$v" 'BEGIN { l = length(k) + 1 }
+        substr($0, 1, l) == k "=" { if (!seen) { print k "=" v; seen = 1 } ; next }
+        { print }
+        END { if (!seen) print k "=" v }' "$f" > "$tmp" || { rm -f "$tmp"; return 0; }
+    cat "$tmp" > "$f"; rm -f "$tmp"
+}
+# Dalvik: "v=n,o=n" (keine Verifikation, keine Optimierung) macht jede App dauerhaft langsamer, weil der
+# Interpreter ohne quickened Opcodes laeuft und Klassen zur Laufzeit verifiziert werden. v=r,o=v ist der
+# Standard echter KitKat-Geraete; der Cache bleibt in /data erhalten, die Kosten fallen nur einmal an.
+apply_perf_tuning() {
+    bp="$ROOTFS/system/build.prop"
+    set_prop_file "$bp" dalvik.vm.dexopt-flags 'v=r,o=v'
+    set_prop_file "$bp" dalvik.vm.checkjni false
+    set_prop_file "$bp" dalvik.vm.heapminfree 1m
+    set_prop_file "$bp" dalvik.vm.heapmaxfree 4m
+    rc="$ROOTFS/init.rc"
+    if [ -f "$rc" ] && grep -q 'dalvik.vm.dexopt-flags' "$rc"; then
+        tmp="$RUN/init.rc.perf"
+        awk '$1 == "setprop" && $2 == "dalvik.vm.dexopt-flags" { print "    setprop dalvik.vm.dexopt-flags v=r,o=v"; next } { print }' "$rc" > "$tmp" \
+            && cat "$tmp" > "$rc"
+        rm -f "$tmp"
+    fi
+    marker="$ROOTFS/data/.kobo-dexopt-v1"
+    if [ "${KOBO_DEXOPT_REBUILD:-1}" = 1 ] && [ ! -e "$marker" ]; then
+        if [ -d "$ROOTFS/data/dalvik-cache" ]; then
+            echo "Dalvik-Cache wird einmalig neu optimiert; der naechste Boot dauert dadurch laenger (Optimizing apps)."
+            # Cache-Dateien heissen system@app@Name.apk@classes.dex; Unterordner (profiles) bleiben erhalten.
+            rm -f "$ROOTFS/data/dalvik-cache"/*@* 2>/dev/null || true
+        fi
+        : > "$marker"
+    fi
+}
+# Laufzeitwerte fuer libkobofb.so (liest /dev/kobo/tuning einmal je Prozess).
+write_tuning() {
+    {
+        echo "KOBO_NOSYNC=${KOBO_NOSYNC:-1}"
+        echo "KOBO_LOG_LEVEL=${KOBO_LOG_LEVEL:-4}"
+    } > "$RUN/shared/tuning"
+    chmod 0644 "$RUN/shared/tuning"
+}
 patch_init_rc() {
     # Das stock-init der Emulator-Ramdisk mountet ein frisches tmpfs auf /dev und versteckt damit
     # alle vom Host vorbereiteten Geraete (binder, ashmem, null, input, kobo). Ohne ueventd gibt es
@@ -231,15 +329,16 @@ bootwatch() {
         echo "--- Props:"; grep -E 'ro.hardware|egl|opengl|qemu' "$ROOTFS/system/build.prop" "$ROOTFS/default.prop" 2>&1
     } > "$BASE/egl.txt" 2>&1
     while [ "$i" -lt 60 ] && kill -0 "$container_pid" 2>/dev/null; do
-        sleep 10; i=$((i + 1)); n=0
-        for d in /proc/[0-9]*; do [ "$(readlink "$d/root" 2>/dev/null)" = "$ROOTFS" ] && n=$((n + 1)); done
+        sleep 10; i=$((i + 1))
+        # Ein ls statt je ein readlink-Prozess pro Host-PID (auf dem Kobo sind das hunderte fork/exec).
+        n=$(ls -l /proc/[0-9]*/root 2>/dev/null | awk -v r="$ROOTFS" '$NF == r { c++ } END { print c + 0 }')
         echo "$(date +%T) t=${i}0s procs=$n boot=$(gp sys.boot_completed) sm=$(gp init.svc.servicemanager) sf=$(gp init.svc.surfaceflinger) zygote=$(gp init.svc.zygote) netd=$(gp init.svc.netd) healthd=$(gp init.svc.healthd) frei_kb=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)" >> "$w"
         # Absturzursache sichtbar machen: logcat (Fehler/Fatal) und neuester Tombstone
         tail -n 150 "$ROOTFS/data/local/tmp/android.log" > "$BASE/logcat.txt" 2>&1
         {
             echo "init.svc.healthd=$(gp init.svc.healthd)"
             echo "--- ps (Android-Prozesse):"
-            for d in /proc/[0-9]*; do [ "$(readlink "$d/root" 2>/dev/null)" = "$ROOTFS" ] && echo "${d#/proc/} $(cat "$d/comm" 2>/dev/null)"; done
+            ls -l /proc/[0-9]*/root 2>/dev/null | awk -v r="$ROOTFS" '$NF == r { split($(NF-2), a, "/"); print a[3] }' | while read -r apid; do echo "$apid $(cat "/proc/$apid/comm" 2>/dev/null)"; done
             echo "--- service check batterypropreg (KitKat-Name):"
             "$ENVB" -i PATH=/system/bin LD_PRELOAD=/system/lib/libkobofb.so "$CHROOTB" "$ROOTFS" /system/bin/service check batterypropreg 2>&1
             echo "--- service check batteryproperties:"
@@ -269,18 +368,29 @@ bootwatch() {
     fi
     # Nach dem Boot weiter mitschreiben: sonst enden android-full.log/logcat.txt beim Boot und
     # spaetere Abstuerze (App-Crash, Download, Datei anlegen) stehen nie in den Logs.
+    diag_n=0; diag_iv=${KOBO_DIAG_INTERVAL:-15}
+    logf="$ROOTFS/data/local/tmp/android.log"
     while kill -0 "$container_pid" 2>/dev/null; do
-        sleep 5
-        tail -n 150 "$ROOTFS/data/local/tmp/android.log" > "$BASE/logcat.txt" 2>&1
-        tail -n 4000 "$ROOTFS/data/local/tmp/android.log" > "$BASE/android-full.log" 2>&1
-        grep -E 'FATAL EXCEPTION|AndroidRuntime|Process: |ANR in|has died|SIGSEGV|DEBUG ' -A12 "$ROOTFS/data/local/tmp/android.log" 2>/dev/null | tail -n 300 > "$BASE/crash.txt"
+        sleep "$diag_iv"; diag_n=$((diag_n + 1))
+        # android.log wuchs bisher unbegrenzt (Android schreibt mit O_APPEND weiter): ab 4 MB kuerzen.
+        sz=$(wc -c < "$logf" 2>/dev/null); sz=${sz:-0}
+        if [ "$sz" -gt 4194304 ]; then
+            tail -n 6000 "$logf" > "$RUN/log.trim" 2>/dev/null && cat "$RUN/log.trim" > "$logf"
+            rm -f "$RUN/log.trim"
+        fi
+        tail -n 150 "$logf" > "$BASE/logcat.txt" 2>&1
+        tail -n 4000 "$logf" > "$BASE/android-full.log" 2>&1
+        tail -n 8000 "$logf" 2>/dev/null | grep -E 'FATAL EXCEPTION|AndroidRuntime|Process: |ANR in|has died|SIGSEGV|DEBUG ' -A12 | tail -n 300 > "$BASE/crash.txt"
         t=$(ls -t "$ROOTFS"/data/tombstones 2>/dev/null | head -n 1)
         if [ -n "$t" ]; then head -n 60 "$ROOTFS/data/tombstones/$t" > "$BASE/tombstone.txt" 2>/dev/null; fi
-        # Native Minidumps (Firefox/Chrome) nach $BASE/dumps kopieren: der Rootfs ist nur waehrend Android laeuft sichtbar.
-        mkdir -p "$BASE/dumps"
-        find "$ROOTFS/data/data" -maxdepth 8 \( -name '*.dmp' -o -name '*.extra' \) 2>/dev/null | head -n 20 | while read -r f; do
-            cp "$f" "$BASE/dumps/$(echo "${f#$ROOTFS/data/data/}" | tr '/ ' '__')" 2>/dev/null
-        done
+        # Die Minidump-Suche (find ueber /data/data) ist teuer: nur jede 4. Runde.
+        if [ $((diag_n % 4)) -eq 1 ]; then
+            # Native Minidumps (Firefox/Chrome) nach $BASE/dumps kopieren: der Rootfs ist nur waehrend Android laeuft sichtbar.
+            mkdir -p "$BASE/dumps"
+            find "$ROOTFS/data/data" -maxdepth 8 \( -name '*.dmp' -o -name '*.extra' \) 2>/dev/null | head -n 20 | while read -r f; do
+                cp "$f" "$BASE/dumps/$(echo "${f#$ROOTFS/data/data/}" | tr '/ ' '__')" 2>/dev/null
+            done
+        fi
     done
 }
 cleanup() {
@@ -301,6 +411,7 @@ cleanup() {
         wait "$vnc_pid" 2>/dev/null || true
     fi
     mounted "$ROOTFS" && kill_rootfs_procs
+    cpu_perf_off
     if [ -f "$ROOTFS/dev/kmsg" ]; then
         cat "$ROOTFS/dev/kmsg" >> "$BASE/android-init.log" 2>/dev/null || true
     fi
@@ -500,7 +611,7 @@ run() {
     [ -f "$BASE/rootfs.img" ] || sh "$BASE/install.sh"
     mkdir -p "$ROOTFS" "$RUN/shared"
     mounted "$ROOTFS" && fail 'Rootfs ist bereits gemountet.'
-    mount -t ext4 -o loop,noatime,nosuid "$BASE/rootfs.img" "$ROOTFS"
+    rootfs_mount
     [ -f "$ROOTFS/kobo-chroot" ] && [ "$(cat "$ROOTFS/kobo-chroot")" = 'android-kitkat_api19' ] || fail 'Falsches Rootfs: KitKat/API-19-Image erforderlich. Altes rootfs.img sichern, entfernen und neu installieren.'
     install_bundled_apps
     CHROOT_BIN=$(command -v chroot) || fail 'chroot nicht gefunden.'
@@ -508,6 +619,7 @@ run() {
     ENVB="$ENV_BIN"
     start_ime_fix
     patch_init_rc
+    apply_perf_tuning
     # Statisches /sbin/healthd ignoriert LD_PRELOAD (Binder-Shim) -> batteryproperties fehlt -> Boot-Schleife.
     grep -aq '/system/bin/linker' "$ROOTFS/sbin/healthd" 2>/dev/null || fail 'Rootfs veraltet: /sbin/healthd ist statisch (kein kobo-healthd). Neues Paket installieren.'
     mkdir -p "$ROOTFS/data/local/tmp"
@@ -547,6 +659,7 @@ run() {
     chmod 0600 "$ROOTFS/dev/kmsg"
     mount -t tmpfs -o size=4m,mode=0755,nosuid,nodev tmpfs "$RUN/shared"
     mount -o bind "$RUN/shared" "$ROOTFS/dev/kobo"
+    write_tuning
     # Persistent shared storage: visible on the Kobo as $BASE/shared and in
     # Android through /sdcard and /storage/emulated/0.
     mkdir -p "$PUBLIC_SHARED" "$ROOTFS/storage/emulated/0"
@@ -578,6 +691,7 @@ run() {
         return 0
     fi
     ifconfig lo 127.0.0.1 up 2>/dev/null || ip link set lo up
+    cpu_perf_on
     "$BASE/bin/kobo-vnc" --shared "$RUN/shared" --input-dir "$ROOTFS/dev/input" --port 5963 &
     vnc_pid=$!
     echo "$vnc_pid" > "$RUN/vnc.pid"
@@ -804,6 +918,7 @@ case "${1:-status}" in
         orphan_active && fail 'Verwaiste Android-Prozesse noch aktiv. Keine Mounts entfernt; Kobo sauber neu starten.'
         # Never kill arbitrary PIDs or lazy-unmount potentially active filesystems.
         unmount_tree || fail 'Mounts belegt. Gerät sauber neu starten.'
+        cpu_perf_off
         rm -f "$RUN/runner.pid" "$RUN/container.pid" "$RUN/vnc.pid" "$RUN/ready"
         rmdir "$RUN/lock" 2>/dev/null || true
         echo 'Laufzeitzustand bereinigt.'

@@ -34,3 +34,10 @@ KitKat 4.4.x ruft in `BatteryService.<init>` `ServiceManager.getService("battery
 
 ## Touch reagierte nicht – Ursache (Lua-Overlay)
 `input.txt` zeigte: Android erkennt das Touchgerät korrekt (touchScreen, Viewport 600x800), aber `getevent -p` meldete `KEY 014a*` – `BTN_TOUCH` war dauerhaft **gedrückt**. Der Lua-Code ließ den Zeiger nur bei den Gesten `release`/`pan_release` los; ein normaler Fingertipp liefert in KOReader aber `touch` → `tap` (keine rohe `release`-Geste). Die „tap“-Verzweigung war durch `now-last_touch>0.6` gesperrt. Folge: Android sah einen Dauer-Druck ohne Loslassen. Fix: `pointer_action()` – `tap`, `swipe`, `hold_release`, `double_tap`, `release`, `pan_release` lösen den Zeiger; zusätzlich ein 6-s-Watchdog als Sicherheitsnetz. Noch nicht auf Gerät verifiziert.
+
+## Geschwindigkeits-Änderungen (siehe PERFORMANCE.md)
+
+Neu getestet auf dem Host: `fsync`/`fdatasync` als No-Op samt `EBADF`, Log-Level-Filter und offener Log-Deskriptor
+im Preload-Shim (`tests/test_native.py`), Idempotenz der Property-/`init.rc`-Anpassung und des einmaligen
+Dalvik-Cache-Reset (Simulation der Shell-Funktionen), `sh -n` und ShellCheck, Lua-Syntax. **Nicht auf dem Gerät
+gemessen**: tatsächliche Beschleunigung, Verhalten der Mountoptionen und des Governors auf dem Kobo-Kernel 4.9.77.

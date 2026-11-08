@@ -246,10 +246,15 @@ static void release_keys(struct kobo_input *i)
  * every SAFETY_MS. Before this, the whole 960 KB frame was memcmp'ed up to 1000 times
  * per second, which stole CPU from SurfaceFlinger and capped Android's own frame rate. */
 #define SAFETY_MS 10
+/* Ohne Seitenwechsel seit IDLE_MS wird nur noch selten verglichen und langsamer gepollt: im Leerlauf
+ * (E-Ink zeigt meist ein stehendes Bild) soll kobo-vnc Android keine CPU wegnehmen. */
+#define IDLE_MS 400
+#define IDLE_SAFETY_MS 80
+#define IDLE_POLL_MS 12
 static int serve_client(int fd,struct kobo_fb *fb,struct kobo_input *input)
 {
     struct format fmt; struct request q; unsigned char *last,*out; int valid=0,rc=-1;
-    uint32_t seen_counter=0,seen_yoffset=0; int64_t last_diff=0; int have_seen=0;
+    uint32_t seen_counter=0,seen_yoffset=0; int64_t last_diff=0,last_moved=0; int have_seen=0;
     size_t out_bytes=16+(size_t)fb->meta->width*fb->meta->height*4;
     default_format(&fmt); memset(&q,0,sizeof(q));
     if(handshake(fd,fb->meta->width,fb->meta->height))return -1;
@@ -259,7 +264,7 @@ static int serve_client(int fd,struct kobo_fb *fb,struct kobo_input *input)
     while(!stopping) {
         struct pollfd p; int n; p.fd=fd; p.events=POLLIN; p.revents=0;
         /* Pending request: wake up every 2 ms to notice a page flip. Idle: sleep longer. */
-        n=poll(&p,1,q.pending?2:20);
+        n=poll(&p,1,q.pending?(milliseconds()-last_moved>IDLE_MS?IDLE_POLL_MS:2):20);
         if(n<0) { if(errno==EINTR)continue; break; }
         if(n>0) {
             if(!(p.revents&POLLIN))break;
@@ -269,8 +274,8 @@ static int serve_client(int fd,struct kobo_fb *fb,struct kobo_input *input)
             struct kobo_fb_meta m; int64_t now=milliseconds(); int run=1;
             if(q.incremental && valid && !kobo_fb_snapshot(fb->meta,&m)) {
                 int moved=!have_seen || m.frame_counter!=seen_counter || m.yoffset!=seen_yoffset;
-                if(moved) { seen_counter=m.frame_counter; seen_yoffset=m.yoffset; have_seen=1; }
-                run=moved || now-last_diff>=SAFETY_MS;
+                if(moved) { seen_counter=m.frame_counter; seen_yoffset=m.yoffset; have_seen=1; last_moved=now; }
+                run=moved || now-last_diff>=(now-last_moved>IDLE_MS?IDLE_SAFETY_MS:SAFETY_MS);
             }
             if(run) { last_diff=now; if(update(fd,fb,&fmt,&q,last,&valid,out))break; }
         }
