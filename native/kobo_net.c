@@ -12,6 +12,7 @@
 #include <linux/sockios.h>
 #include <net/if.h>
 #include <netinet/in.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/syscall.h>
@@ -70,12 +71,12 @@ int kobo_net_hides_path(const char *path, int flags)
 NOOP(ifc_clear_addresses(const char *name), "ifc_clear_addresses")
 NOOP(ifc_down(const char *name), "ifc_down")
 NOOP(ifc_disable(const char *name), "ifc_disable")
-NOOP(ifc_set_addr(const char *name, in_addr_t addr), "ifc_set_addr")
+NOOP(ifc_set_addr(const char *name, uint32_t addr), "ifc_set_addr")
 NOOP(ifc_set_prefixLength(const char *name, int prefix), "ifc_set_prefixLength")
 NOOP(ifc_add_address(const char *name, const char *address, int prefixlen), "ifc_add_address")
 NOOP(ifc_del_address(const char *name, const char *address, int prefixlen), "ifc_del_address")
-NOOP(ifc_configure(const char *name, in_addr_t a, unsigned p, in_addr_t g, in_addr_t d1, in_addr_t d2), "ifc_configure")
-NOOP(ifc_create_default_route(const char *name, in_addr_t gw), "ifc_create_default_route")
+NOOP(ifc_configure(const char *name, uint32_t a, unsigned p, uint32_t g, uint32_t d1, uint32_t d2), "ifc_configure")
+NOOP(ifc_create_default_route(const char *name, uint32_t gw), "ifc_create_default_route")
 NOOP(ifc_add_route(const char *name, const char *dst, int prefix, const char *gw), "ifc_add_route")
 NOOP(ifc_remove_route(const char *name, const char *dst, int prefix, const char *gw), "ifc_remove_route")
 NOOP(ifc_remove_default_route(const char *name), "ifc_remove_default_route")
