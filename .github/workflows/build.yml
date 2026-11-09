@@ -50,7 +50,7 @@ jobs:
     timeout-minutes: 45
     env:
       JOBS: '2'
-      ROOTFS_SIZE_MIB: '768'
+      ROOTFS_SIZE_MIB: '2048'
       ANDROID_API: ${{ inputs.android_api || '19' }}
     steps:
       - uses: actions/checkout@v4

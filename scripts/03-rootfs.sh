@@ -20,7 +20,7 @@ else
     echo 'Using file ownership and modes preserved from the verified SDK image.'
 fi
 sudo python3 "$ROOT/scripts/rootfs.py" image --stage "$STAGE" \
-    --output "$BUILD/rootfs.img" --size-mib "${ROOTFS_SIZE_MIB:-768}"
+    --output "$BUILD/rootfs.img" --size-mib "${ROOTFS_SIZE_MIB:-2048}"
 # gzip -n omits timestamps; a sparse ext4 file compresses to its populated data.
 gzip -n -1 -c "$BUILD/rootfs.img" > "$BUILD/rootfs.img.gz"
 stat -c '%s' "$BUILD/rootfs.img" > "$BUILD/rootfs.size"

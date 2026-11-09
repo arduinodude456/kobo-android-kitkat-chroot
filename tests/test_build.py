@@ -95,6 +95,14 @@ class PatcherTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_rootfs_defaults_to_two_gibibytes(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        build = (ROOT / 'scripts/03-rootfs.sh').read_text()
+        generator = (ROOT / 'scripts/rootfs.py').read_text()
+        self.assertIn("ROOTFS_SIZE_MIB: '2048'", workflow)
+        self.assertIn('${ROOTFS_SIZE_MIB:-2048}', build)
+        self.assertIn("type=int, default=2048", generator)
+
     def test_prebuilt_image_workflow_skips_full_aosp_build(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
         prebuilt = workflow.index('scripts/00-prebuilt-sdk.sh')
@@ -210,7 +218,7 @@ class PackageTests(unittest.TestCase):
         compressed = gzip.compress(b'explicit synthetic package fixture, not an Android image')
         (self.build / 'rootfs.img.gz').write_bytes(compressed)
         (self.build / 'rootfs.img.gz.sha256').write_text(hashlib.sha256(compressed).hexdigest() + '  rootfs.img.gz\n')
-        (self.build / 'rootfs.size').write_text(str(768 * 1024 * 1024) + '\n')
+        (self.build / 'rootfs.size').write_text(str(2048 * 1024 * 1024) + '\n')
         for name in ('kobo-vnc', 'kobo-container'):
             binary = self.product / 'system/bin' / name
             binary.parent.mkdir(parents=True, exist_ok=True)

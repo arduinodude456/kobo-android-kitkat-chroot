@@ -155,7 +155,7 @@ def main():
     parser.add_argument('--product', type=Path)
     parser.add_argument('--config', type=Path)
     parser.add_argument('--output', type=Path)
-    parser.add_argument('--size-mib', type=int, default=768)
+    parser.add_argument('--size-mib', type=int, default=2048)
     args = parser.parse_args()
     try:
         if args.phase == 'prepare': prepare(args.product, args.stage)
