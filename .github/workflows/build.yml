@@ -63,6 +63,11 @@ jobs:
         run: |
           set -o pipefail
           bash scripts/00-prebuilt-sdk.sh 2>&1 | tee build-prebuilt.log
+      - name: Cross-build Mesa softpipe GLES2/EGL for the chroot
+        run: |
+          set -o pipefail
+          sudo apt-get install -y flex bison pkg-config python3-mako git
+          bash scripts/05-mesa.sh 2>&1 | tee build/logs/mesa.log
       - name: Build ownership-correct ext4 chroot image
         run: |
           set -o pipefail

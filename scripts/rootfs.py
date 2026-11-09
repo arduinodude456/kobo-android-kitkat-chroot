@@ -45,6 +45,12 @@ def validate(stage):
                  'system/lib/libkobofb.so', 'system/lib/egl/libGLES_android.so',
                  'system/lib/hw/gralloc.default.so'):
         arm_elf(stage / name)
+    for name in ('system/lib/egl/libEGL_mesa.so', 'system/lib/egl/libGLESv1_CM_mesa.so',
+                 'system/lib/egl/libGLESv2_mesa.so', 'system/lib/libglapi.so.0',
+                 'system/lib/egl/dri/swrast_dri.so', 'system/bin/kobo-gles-test'):
+        if not (stage / name).is_file():
+            raise ValueError('missing Mesa GLES2 component (run scripts/05-mesa.sh): ' + name)
+        arm_elf(stage / name)
     for name in ('kobo-vnc', 'kobo-container', 'vold'):
         arm_elf(stage / 'system/bin' / name, static=True)
     arm_elf(stage / 'sbin/healthd')

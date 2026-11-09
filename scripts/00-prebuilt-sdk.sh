@@ -99,7 +99,7 @@ values = {
     'ro.kernel.qemu': '1',
     'ro.kernel.qemu.gles': '0',
     'ro.hardware.egl': 'android',
-    'ro.opengles.version': '65536',
+    'ro.opengles.version': '131072',
     'ro.sf.lcd_density': '160',
     'ro.config.low_ram': 'true',
     'ro.product.board': 'kobo',

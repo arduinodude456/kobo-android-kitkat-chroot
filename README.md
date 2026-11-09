@@ -20,6 +20,8 @@ Die Chroot-Init-Konfiguration übernimmt jetzt die entscheidende QEMU-Bootfolge:
 
 Das SDK-Systemimage bleibt ein generischer Emulator-Userspace und kein Kobo-ROM. Der Libra Colour startet Kobo-Linux und erhält Android hier nur als Chroot-Userspace. Android-GSIs sind kein Ersatz: Sie setzen ein entsperrtes, Treble-fähiges Gerät mit passender Android-Basis voraus.
 
+**OpenGL ES 2:** Alle Apps außer SurfaceFlinger nutzen Mesa/softpipe (für Chrome, Firefox) – siehe [docs/GLES2.md](docs/GLES2.md).
+
 ## RAM-schonender Ansatz
 
 Die Android-Anzeige bleibt bei 600 × 800 Pixeln und RGB565 mit zwei Bildseiten. Die VNC-Brücke benötigt keine externe VNC-Bibliothek. KOReader zeigt das Bild ohne zusätzliche Desktop-Umgebung an. Niedrige Dalvik-Heap-Limits, Low-RAM-Einstellungen, deaktivierte Animationen und eine reduzierte Grafik-Konfiguration sollen unnötige Last begrenzen.
