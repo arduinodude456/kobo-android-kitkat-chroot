@@ -28,6 +28,11 @@ EDITS = [
      '#ifndef SYS_futex\n#define SYS_futex __NR_futex\n#endif\n'
      '#ifndef FUTEX_WAIT_BITSET\n#define FUTEX_WAIT_BITSET 9\n#endif\n'
      '#ifndef FUTEX_BITSET_MATCH_ANY\n#define FUTEX_BITSET_MATCH_ANY 0xffffffff\n#endif\n'),
+    # bionic (API 19) has no pthread_barrier_*: use Mesa's own mutex/condvar
+    # util_barrier fallback instead of the pthread one.
+    (Path('src/util/u_thread.h'),
+     '#if defined(HAVE_PTHREAD) && !defined(__APPLE__)\n\ntypedef pthread_barrier_t util_barrier;',
+     '#if defined(HAVE_PTHREAD) && !defined(__APPLE__) && !defined(__ANDROID__)\n\ntypedef pthread_barrier_t util_barrier;'),
     # Mesa 18.0.5 has no --disable-shader-cache: configure always defines
     # ENABLE_SHADER_CACHE, and disk_cache.c then needs <ftw.h>, which bionic
     # lacks.  Drop the define so the upstream no-cache stubs are used.
