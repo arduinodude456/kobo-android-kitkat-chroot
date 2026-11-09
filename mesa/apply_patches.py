@@ -17,6 +17,17 @@ EDITS = [
     # The stock platform needs the DRM-aware gralloc header; the software
     # platform in platform_android_kobo.c does not.
     (EGL / 'egl_dri2.h', '#include <gralloc_drm_handle.h>\n', ''),
+    # bionic (API 19) has no pthread_mutex_timedlock(): use the busy-loop fallback.
+    (Path('include/c11/threads_posix.h'),
+     '#if !defined(__CYGWIN__) && !defined(__APPLE__) && !defined(__NetBSD__)\n',
+     '#if !defined(__CYGWIN__) && !defined(__APPLE__) && !defined(__NetBSD__) && !defined(__ANDROID__)\n'),
+    # NDK r10e: no SYS_futex alias and an old linux/futex.h without the BITSET ops.
+    (Path('src/util/futex.h'),
+     '#include <sys/syscall.h>\n#include <sys/time.h>\n',
+     '#include <sys/syscall.h>\n#include <sys/time.h>\n'
+     '#ifndef SYS_futex\n#define SYS_futex __NR_futex\n#endif\n'
+     '#ifndef FUTEX_WAIT_BITSET\n#define FUTEX_WAIT_BITSET 9\n#endif\n'
+     '#ifndef FUTEX_BITSET_MATCH_ANY\n#define FUTEX_BITSET_MATCH_ANY 0xffffffff\n#endif\n'),
 ]
 
 
