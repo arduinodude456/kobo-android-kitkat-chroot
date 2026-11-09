@@ -28,6 +28,12 @@ EDITS = [
      '#ifndef SYS_futex\n#define SYS_futex __NR_futex\n#endif\n'
      '#ifndef FUTEX_WAIT_BITSET\n#define FUTEX_WAIT_BITSET 9\n#endif\n'
      '#ifndef FUTEX_BITSET_MATCH_ANY\n#define FUTEX_BITSET_MATCH_ANY 0xffffffff\n#endif\n'),
+    # Mesa 18.0.5 has no --disable-shader-cache: configure always defines
+    # ENABLE_SHADER_CACHE, and disk_cache.c then needs <ftw.h>, which bionic
+    # lacks.  Drop the define so the upstream no-cache stubs are used.
+    # configure.ac first, then configure, so make does not re-run autoconf.
+    (Path('configure.ac'), 'DEFINES="$DEFINES -DENABLE_SHADER_CACHE"\n', ''),
+    (Path('configure'), 'DEFINES="$DEFINES -DENABLE_SHADER_CACHE"\n', ''),
 ]
 
 

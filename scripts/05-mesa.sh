@@ -103,8 +103,7 @@ mkdir -p "$W/build" && cd "$W/build"
     --disable-gallium-llvm --disable-llvm-shared-libs \
     --disable-glx --disable-glx-tls --disable-gbm --disable-dri3 --disable-xa --disable-xvmc \
     --disable-vdpau --disable-va --disable-omx-bellagio --disable-opencl --disable-nine \
-    --disable-osmesa --disable-libunwind --disable-valgrind --disable-asm \
-    --disable-shader-cache
+    --disable-osmesa --disable-libunwind --disable-valgrind --disable-asm
 make -j"$JOBS_MESA"
 make DESTDIR="$OUT" install
 
