@@ -69,20 +69,11 @@ const char *kobo_egl_override(const char *key, const char *process,
 int property_get(const char *key, char *value, const char *default_value)
 {
     static char process[256];
-    static pid_t process_pid;
     static int installed = -1, disabled = -1;
     Dl_info info;
     int from_egl = 0;
     const char *forced;
 
-    /* Pro PID neu lesen: Apps sind Zygote-Forks und erben sonst den Namen "zygote". */
-    if (process_pid != getpid()) {
-        int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
-        ssize_t n = fd >= 0 ? read(fd, process, sizeof process - 1) : -1;
-        if (fd >= 0) close(fd);
-        process[n > 0 ? n : 0] = 0;
-        process_pid = getpid();
-    }
     if (installed < 0) {
         installed = access("/system/lib/egl/libEGL_mesa.so", R_OK) == 0;
         /* A file /data/local/kobo-gles-off turns the Mesa path off. */
@@ -90,8 +81,16 @@ int property_get(const char *key, char *value, const char *default_value)
     }
     if (strncmp(key, "ro.hardware.egl", 16) == 0 || strncmp(key, "ro.kernel.qemu", 15) == 0) {
         if (dladdr(__builtin_return_address(0), &info) && info.dli_fname &&
-            strstr(info.dli_fname, "libEGL"))
+            strstr(info.dli_fname, "libEGL")) {
+            /* Prozessname bei JEDEM EGL-Aufruf frisch lesen (nur diese zwei Keys, selten):
+             * Zygote-Forks heissen anfangs "zygote"; wuerde der Name bei irgendeinem frueheren
+             * property_get() gecacht, bliebe er fuer immer "zygote" -> nie Mesa. */
+            int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
+            ssize_t n = fd >= 0 ? read(fd, process, sizeof process - 1) : -1;
+            if (fd >= 0) close(fd);
+            process[n > 0 ? n : 0] = 0;
             from_egl = 1;
+        }
     }
     forced = kobo_egl_override(key, process, from_egl, installed, disabled);
     if (forced) {

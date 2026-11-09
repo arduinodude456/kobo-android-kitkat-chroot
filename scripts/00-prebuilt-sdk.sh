@@ -100,6 +100,9 @@ values = {
     'ro.kernel.qemu.gles': '0',
     'ro.hardware.egl': 'android',
     'ro.opengles.version': '131072',
+    # Zygote darf EGL nicht vorladen: sonst bindet der Loader (Singleton) schon im Zygote libGLES_android.so
+    # und alle Apps erben es -> Chrome/Firefox bekommen nie Mesa/GLES2.
+    'ro.zygote.disable_gl_preload': '1',
     'ro.sf.lcd_density': '160',
     'ro.config.low_ram': 'true',
     'ro.product.board': 'kobo',
