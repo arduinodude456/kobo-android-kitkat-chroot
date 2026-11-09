@@ -5,7 +5,17 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#if defined(__has_include)
+#if __has_include(<sys/system_properties.h>)
 #include <sys/system_properties.h>
+#endif
+#endif
+#ifndef PROP_VALUE_MAX /* host builds (glibc) have no bionic property header */
+#define PROP_VALUE_MAX 92
+int __system_property_get(const char *name, char *value);
+#endif
+/* weak: absent on glibc hosts, where the tests link libkobofb.so directly */
+extern int __system_property_get(const char *name, char *value) __attribute__((weak));
 #include <unistd.h>
 
 static int base_is(const char *process, const char *name)
@@ -67,7 +77,7 @@ int property_get(const char *key, char *value, const char *default_value)
         return (int) strlen(value);
     }
     {
-        int len = __system_property_get(key, value);
+        int len = __system_property_get ? __system_property_get(key, value) : 0;
         if (len > 0)
             return len;
         if (default_value) {
