@@ -33,6 +33,14 @@ EDITS = [
     (Path('src/util/u_thread.h'),
      '#if defined(HAVE_PTHREAD) && !defined(__APPLE__)\n\ntypedef pthread_barrier_t util_barrier;',
      '#if defined(HAVE_PTHREAD) && !defined(__APPLE__) && !defined(__ANDROID__)\n\ntypedef pthread_barrier_t util_barrier;'),
+    # bionic (API 19) has no pthread_condattr_setclock() (added in API 21).  It
+    # is only used for EGL_SYNC_REUSABLE_KHR; keep the default cond clock there.
+    (EGL / 'egl_dri2.c',
+     '      /* change clock attribute to CLOCK_MONOTONIC */\n'
+     '      ret = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);\n',
+     '      /* change clock attribute to CLOCK_MONOTONIC */\n'
+     '#ifdef __ANDROID__\n      ret = 0; /* no pthread_condattr_setclock in bionic API 19 */\n'
+     '#else\n      ret = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);\n#endif\n'),
     # Mesa 18.0.5 has no --disable-shader-cache: configure always defines
     # ENABLE_SHADER_CACHE, and disk_cache.c then needs <ftw.h>, which bionic
     # lacks.  Drop the define so the upstream no-cache stubs are used.
