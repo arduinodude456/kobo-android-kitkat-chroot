@@ -68,9 +68,25 @@ export LDFLAGS="--sysroot=$SYSROOT -L$DEPS/lib -L$PRODUCT/system/lib -L$STL/libs
 export LIBS="-lgnustl_static -llog -ldl"
 export PKG_CONFIG_PATH="$DEPS/lib/pkgconfig" PKG_CONFIG_LIBDIR="$DEPS/lib/pkgconfig"
 
-# expat
-( cd "$W/src/expat-2.2.9" && ./configure --host=$TRIPLE --prefix="$DEPS" --disable-shared --enable-static \
-      --without-docbook --without-xmlwf --without-examples --without-tests LIBS= >/dev/null && make -j"$JOBS_MESA" install >/dev/null )
+# expat: the upstream tarball ships no configure script, so compile the three
+# library sources directly into a static library.
+EXPAT_SRC="$W/src/libexpat-R_2_2_9/expat/lib"
+cat > "$EXPAT_SRC/expat_config.h" <<'CFG'
+#define BYTEORDER 1234
+#define HAVE_MEMMOVE 1
+#define XML_CONTEXT_BYTES 1024
+#define XML_DTD 1
+#define XML_GE 1
+#define XML_NS 1
+#define XML_DEV_URANDOM 1
+CFG
+for f in xmlparse xmltok xmlrole; do
+    $CC $CFLAGS -DHAVE_EXPAT_CONFIG_H -I"$EXPAT_SRC" -c "$EXPAT_SRC/$f.c" -o "$W/$f.o"
+done
+$AR rcs "$DEPS/lib/libexpat.a" "$W"/xmlparse.o "$W"/xmltok.o "$W"/xmlrole.o
+$RANLIB "$DEPS/lib/libexpat.a"
+cp "$EXPAT_SRC/expat.h" "$EXPAT_SRC/expat_external.h" "$DEPS/include/"
+printf 'Name: expat\nDescription: expat\nVersion: 2.2.9\nLibs: -lexpat\nCflags: -I%s/include\n' "$DEPS" > "$DEPS/lib/pkgconfig/expat.pc"
 # pkg-config files for the Android system libraries and zlib (from the NDK sysroot)
 for m in cutils hardware sync; do
     printf 'prefix=%s\nName: %s\nDescription: android %s\nVersion: 4.4.4\nLibs: -l%s\nCflags: -I%s/include\n' "$DEPS" "$m" "$m" "$m" "$DEPS" > "$DEPS/lib/pkgconfig/$m.pc"
