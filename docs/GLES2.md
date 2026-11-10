@@ -51,18 +51,23 @@ wenigen Sekunden pro Bild. Maßnahmen im Build (`scripts/05-mesa.sh`):
   (alter Build: `MESA_ARCH="-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=softfp" MESA_OPT=-O2`).
 * Ohne NEON in `/proc/cpuinfo` lädt `kobo_egl.c` Mesa nicht, sondern bleibt bei `libGLES_android.so` (Log-Tag `kobo-egl`).
 
-* **Renderauflösung (`KOBO_GLES_SCALE`, Standard 2):** `mesa/platform_android_kobo.c` setzt für Fenster-Surfaces per
+* **Renderauflösung (`KOBO_GLES_SCALE`, Standard 0 = automatisch):** `mesa/platform_android_kobo.c` setzt für Fenster-Surfaces per
   `NATIVE_WINDOW_SET_BUFFERS_DIMENSIONS` + `SCALE_TO_WINDOW` eine auf 1/N verkleinerte Puffergröße (wie `SurfaceHolder.setFixedSize`);
-  `eglQuerySurface` meldet die kleine Größe, SurfaceFlinger streckt das Bild. softpipe-Kosten sind ~proportional zur Pixelzahl:
-  2 = 4x weniger, 3 = 9x weniger Pixel. Einstellbar in `runtime/config`, per `KOBO_GLES_SCALE=…` in der Umgebung oder
-  `/dev/kobo/tuning`; 1 schaltet es ab. Nur ohne neues Mesa wirkt es nicht – `libEGL_mesa.so` muss neu gebaut werden.
+  `eglQuerySurface` meldet die kleine Größe, SurfaceFlinger streckt das Bild. Die Kosten sind ~proportional zur Pixelzahl.
+  Automatik: **2 mit llvmpipe** (4x weniger Pixel), **3 mit softpipe** (9x weniger Pixel). llvmpipe erkennt der Code an der Markerdatei
+  `/system/lib/egl/dri/llvmpipe.flag` (legt `05-mesa.sh` bei `MESA_LLVMPIPE=1` an). Fest einstellbar in `runtime/config`, per
+  `KOBO_GLES_SCALE=…` in der Umgebung oder `/dev/kobo/tuning`; 1 schaltet es ab. Wirkt nur mit neu gebautem `libEGL_mesa.so`.
+* **Frame-Pfad:** Die Pixelumwandlung beim Präsentieren (`mesa/droid_convert.h`) arbeitet mit 32-Bit-Wörtern und eigenen
+  565↔8888-Schleifen statt einem `switch` pro Pixel. Bitgleich zur alten Version (Host-Test `tests/host/test_convert.c`).
 
 Das bringt erfahrungsgemäß nur einen Faktor von etwa 1,3 bis 2. Deutlich mehr bringt weniger Rendering-Arbeit in der App
 (kleinere Sichtweite, keine Schatten/Shader-Effekte, Texturfilter aus, 3D-Auflösung verringern, sofern die App das anbietet).
-### llvmpipe (optional, ungetestet auf dem Gerät)
+### llvmpipe (jetzt Standard im CI, mit automatischem Rückfall)
 
 Ein echter Sprung ist nur mit llvmpipe möglich: Shader und Rasterizer werden per LLVM-JIT zu NEON-Code kompiliert und auf
-allen CPU-Kernen (Raster-Threads) ausgeführt. Der Build ist **optional** und standardmäßig aus:
+allen CPU-Kernen (Raster-Threads) ausgeführt. Der Workflow baut es jetzt **standardmäßig** (`llvmpipe` = an). Scheitert der LLVM- oder
+der llvmpipe-Mesa-Build, baut der Workflow automatisch die reine softpipe-Variante (dann Render-Scale 3). Der erste Lauf dauert Stunden,
+der LLVM-Prefix wird danach gecacht:
 
 * CI: Workflow „Run workflow“ → `llvmpipe` anhaken (Timeout 330 min; der LLVM-Prefix wird gecacht). Lokal: `MESA_LLVMPIPE=1 bash scripts/05-mesa.sh`
   (ruft bei Bedarf `scripts/05-llvm.sh` auf).

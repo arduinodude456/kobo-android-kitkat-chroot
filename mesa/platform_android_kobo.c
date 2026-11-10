@@ -39,32 +39,9 @@
 #include "loader.h"
 #include "egl_dri2.h"
 #include "egl_dri2_fallbacks.h"
+#include "droid_convert.h"
 
-/* Pixel layouts we can produce or consume, named by the byte order in memory. */
-enum droid_px {
-   DROID_PX_NONE = 0,
-   DROID_PX_RGBA,   /* HAL_PIXEL_FORMAT_RGBA_8888: bytes R,G,B,A */
-   DROID_PX_RGBX,   /* HAL_PIXEL_FORMAT_RGBX_8888: bytes R,G,B,x */
-   DROID_PX_BGRA,   /* HAL_PIXEL_FORMAT_BGRA_8888 / Mesa B8G8R8A8: bytes B,G,R,A */
-   DROID_PX_BGRX,   /* Mesa B8G8R8X8: bytes B,G,R,x */
-   DROID_PX_565,    /* HAL_PIXEL_FORMAT_RGB_565 / Mesa B5G6R5: little endian 16 bit */
-};
-
-static int
-droid_px_bytes(enum droid_px px)
-{
-   switch (px) {
-   case DROID_PX_RGBA:
-   case DROID_PX_RGBX:
-   case DROID_PX_BGRA:
-   case DROID_PX_BGRX:
-      return 4;
-   case DROID_PX_565:
-      return 2;
-   default:
-      return 0;
-   }
-}
+/* enum droid_px, droid_px_bytes() and droid_convert_row() live in droid_convert.h. */
 
 static enum droid_px
 droid_px_from_hal(int format)
@@ -87,94 +64,6 @@ droid_px_from_config(const _EGLConfig *conf)
    return conf->AlphaSize > 0 ? DROID_PX_BGRA : DROID_PX_BGRX;
 }
 
-static inline bool
-droid_px_has_alpha(enum droid_px px)
-{
-   return px == DROID_PX_RGBA || px == DROID_PX_BGRA;
-}
-
-static void
-droid_decode(enum droid_px px, const uint8_t *s, unsigned *r, unsigned *g,
-             unsigned *b, unsigned *a)
-{
-   switch (px) {
-   case DROID_PX_RGBA: *r = s[0]; *g = s[1]; *b = s[2]; *a = s[3]; break;
-   case DROID_PX_RGBX: *r = s[0]; *g = s[1]; *b = s[2]; *a = 0xff; break;
-   case DROID_PX_BGRA: *b = s[0]; *g = s[1]; *r = s[2]; *a = s[3]; break;
-   case DROID_PX_BGRX: *b = s[0]; *g = s[1]; *r = s[2]; *a = 0xff; break;
-   case DROID_PX_565: {
-      unsigned p = s[0] | (s[1] << 8);
-      unsigned rr = (p >> 11) & 0x1f, gg = (p >> 5) & 0x3f, bb = p & 0x1f;
-      *r = (rr << 3) | (rr >> 2);
-      *g = (gg << 2) | (gg >> 4);
-      *b = (bb << 3) | (bb >> 2);
-      *a = 0xff;
-      break;
-   }
-   default: *r = *g = *b = 0; *a = 0xff; break;
-   }
-}
-
-static void
-droid_encode(enum droid_px px, uint8_t *d, unsigned r, unsigned g, unsigned b,
-             unsigned a)
-{
-   switch (px) {
-   case DROID_PX_RGBA: d[0] = r; d[1] = g; d[2] = b; d[3] = a; break;
-   case DROID_PX_RGBX: d[0] = r; d[1] = g; d[2] = b; d[3] = 0xff; break;
-   case DROID_PX_BGRA: d[0] = b; d[1] = g; d[2] = r; d[3] = a; break;
-   case DROID_PX_BGRX: d[0] = b; d[1] = g; d[2] = r; d[3] = 0xff; break;
-   case DROID_PX_565: {
-      unsigned p = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-      d[0] = p & 0xff;
-      d[1] = p >> 8;
-      break;
-   }
-   default: break;
-   }
-}
-
-/* Convert one row of n pixels.  X formats have an undefined alpha byte: it is
- * forced to 0xff whenever either side has no alpha. */
-static void
-droid_convert_row(enum droid_px dst_px, uint8_t *dst,
-                  enum droid_px src_px, const uint8_t *src, int n)
-{
-   int i;
-
-   if (dst_px == src_px) {
-      memcpy(dst, src, (size_t) n * droid_px_bytes(src_px));
-      return;
-   }
-
-   /* Fast path: R<->B swizzle between 32 bit layouts with the same alpha kind. */
-   if (droid_px_bytes(src_px) == 4 && droid_px_bytes(dst_px) == 4) {
-      bool swap = ((src_px == DROID_PX_BGRA || src_px == DROID_PX_BGRX) !=
-                   (dst_px == DROID_PX_BGRA || dst_px == DROID_PX_BGRX));
-      bool force_opaque = !droid_px_has_alpha(src_px) || !droid_px_has_alpha(dst_px);
-      for (i = 0; i < n; i++, src += 4, dst += 4) {
-         uint8_t c0 = src[0], c1 = src[1], c2 = src[2], c3 = src[3];
-         if (swap) {
-            uint8_t t = c0; c0 = c2; c2 = t;
-         }
-         dst[0] = c0;
-         dst[1] = c1;
-         dst[2] = c2;
-         dst[3] = force_opaque ? 0xff : c3;
-      }
-      return;
-   }
-
-   {
-      const int sb = droid_px_bytes(src_px), db = droid_px_bytes(dst_px);
-      for (i = 0; i < n; i++, src += sb, dst += db) {
-         unsigned r, g, b, a;
-         droid_decode(src_px, src, &r, &g, &b, &a);
-         droid_encode(dst_px, dst, r, g, b, a);
-      }
-   }
-}
-
 /* ---------------------------------------------------------------------- */
 
 static int
@@ -186,31 +75,39 @@ droid_usage(void)
 /* ---------------------------------------------------------------------- */
 /* Render scale                                                            */
 
-/* softpipe is a C rasterizer: the cost per frame is proportional to the number of
- * pixels.  The e-ink panel (Kaleido, dithered to a few colours) hides a lower 3D
- * resolution well, so window surfaces are rendered at 1/scale of the window size
- * (like SurfaceHolder.setFixedSize) and SurfaceFlinger stretches the buffer.
- * scale 1 = off.  Source: KOBO_GLES_SCALE (environment or /dev/kobo/tuning, read
- * through libkobofb.so's kobo_tunable), default 2 (= 4x fewer pixels). */
+/* The software rasterizers cost time proportional to the number of pixels.  The e-ink
+ * panel (Kaleido, dithered to a few colours) hides a lower 3D resolution well, so window
+ * surfaces are rendered at 1/scale of the window size (like SurfaceHolder.setFixedSize)
+ * and SurfaceFlinger stretches the buffer.  scale 1 = off.
+ * Source: KOBO_GLES_SCALE (environment or /dev/kobo/tuning, read through libkobofb.so's
+ * kobo_tunable).  0 (default) = automatic: 2 with llvmpipe (JIT, all cores), 3 with softpipe
+ * (single threaded C, 9x fewer pixels).  llvmpipe is present when the build installed the
+ * marker file below and KOBO_GLES_LLVMPIPE is not 0. */
+#define DROID_LLVMPIPE_MARKER "/system/lib/egl/dri/llvmpipe.flag"
+
 static int
 droid_render_scale(void)
 {
    static int cached;
-   int (*tunable)(const char *, int);
-   int scale = 2;
+   int (*tunable)(const char *, int) = (int (*)(const char *, int)) dlsym(RTLD_DEFAULT, "kobo_tunable");
+   int scale = 0;
 
    if (cached)
       return cached;
-   tunable = (int (*)(const char *, int)) dlsym(RTLD_DEFAULT, "kobo_tunable");
    if (tunable) {
-      scale = tunable("KOBO_GLES_SCALE", 2);
+      scale = tunable("KOBO_GLES_SCALE", 0);
    } else {
       const char *e = getenv("KOBO_GLES_SCALE");
       if (e && *e)
          scale = atoi(e);
    }
-   if (scale < 1)
-      scale = 1;
+   if (scale <= 0) {
+      const char *drv = getenv("GALLIUM_DRIVER");
+      bool llvmpipe = access(DROID_LLVMPIPE_MARKER, F_OK) == 0 &&
+                      (tunable ? tunable("KOBO_GLES_LLVMPIPE", 1) != 0 : true) &&
+                      !(drv && strcmp(drv, "softpipe") == 0);
+      scale = llvmpipe ? 2 : 3;
+   }
    if (scale > 4)
       scale = 4;
    cached = scale;

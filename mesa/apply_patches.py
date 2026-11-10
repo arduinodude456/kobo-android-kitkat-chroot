@@ -72,6 +72,7 @@ def main():
                 continue
             sys.exit('edit does not apply to ' + str(rel))
     shutil.copyfile(HERE / 'platform_android_kobo.c', root / EGL / 'platform_android.c')
+    shutil.copyfile(HERE / 'droid_convert.h', root / EGL / 'droid_convert.h')
     print('Mesa 18.0.5 patched for the Kobo software EGL platform')
 
 

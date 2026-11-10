@@ -167,6 +167,12 @@ inst "$(readlink -f "$L/libglapi.so")"      "$PRODUCT/system/lib/libglapi.so.0"
 # name and provide the SONAME path expected by KitKat's dynamic linker too.
 sudo ln -sfn libglapi.so.0 "$PRODUCT/system/lib/libglapi.so"
 inst "$L/egl/dri/swrast_dri.so"             "$PRODUCT/system/lib/egl/dri/swrast_dri.so"
+# Marker for platform_android_kobo.c (automatic render scale): llvmpipe is inside swrast_dri.so.
+if [[ "$MESA_LLVMPIPE" = 1 ]]; then
+    sudo install -m 0644 -o root -g root /dev/null "$PRODUCT/system/lib/egl/dri/llvmpipe.flag"
+else
+    sudo rm -f "$PRODUCT/system/lib/egl/dri/llvmpipe.flag"
+fi
 
 # Fail the build now if the KitKat linker could not dlopen() these libraries (missing NEEDED lib,
 # unresolved symbol, TLS, no DT_HASH).  On the device such a failure makes Chrome crash with

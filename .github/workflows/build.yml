@@ -9,9 +9,9 @@ on:
         default: '19'
         options: ['19']
       llvmpipe:
-        description: 'Mesa mit llvmpipe (LLVM 6.0.1 ARM-Cross-Build, dauert lange, ungetestet) statt nur softpipe'
+        description: 'Mesa mit llvmpipe (LLVM-JIT, viel schneller als softpipe; erster Lauf dauert Stunden, danach gecacht). Scheitert es, wird automatisch softpipe gebaut'
         type: boolean
-        default: false
+        default: true
   push:
     branches: [main]
   pull_request:
@@ -54,7 +54,6 @@ jobs:
     timeout-minutes: ${{ inputs.llvmpipe && 330 || 45 }}
     env:
       JOBS: '2'
-      MESA_LLVMPIPE: ${{ inputs.llvmpipe && '1' || '0' }}
       ROOTFS_SIZE_MIB: '2048'
       ANDROID_API: ${{ inputs.android_api || '19' }}
     steps:
@@ -75,12 +74,27 @@ jobs:
           path: build/llvm/prefix
           key: llvm-6.0.1-arm-${{ hashFiles('scripts/05-llvm.sh', 'llvm/apply_patches.py') }}
       - name: Cross-build LLVM 6.0.1 for llvmpipe (ARM only, static; llvmpipe only)
+        id: llvm
         if: ${{ inputs.llvmpipe }}
+        continue-on-error: true
         run: |
           set -o pipefail
           sudo apt-get install -y cmake ninja-build bzip2
           bash scripts/05-llvm.sh 2>&1 | tee build/logs/llvm.log
-      - name: Cross-build Mesa (softpipe, plus llvmpipe if selected) GLES2/EGL for the chroot
+      - name: Cross-build Mesa with llvmpipe (+ softpipe) GLES2/EGL for the chroot
+        id: mesa_llvm
+        if: ${{ inputs.llvmpipe && steps.llvm.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          MESA_LLVMPIPE: '1'
+        run: |
+          set -o pipefail
+          sudo apt-get install -y flex bison pkg-config python3-mako git
+          bash scripts/05-mesa.sh 2>&1 | tee build/logs/mesa-llvmpipe.log
+      - name: Cross-build Mesa with softpipe only (fallback if llvmpipe was off or failed)
+        if: ${{ steps.mesa_llvm.outcome != 'success' }}
+        env:
+          MESA_LLVMPIPE: '0'
         run: |
           set -o pipefail
           sudo apt-get install -y flex bison pkg-config python3-mako git

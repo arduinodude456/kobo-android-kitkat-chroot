@@ -220,7 +220,7 @@ write_tuning() {
     {
         echo "KOBO_NOSYNC=${KOBO_NOSYNC:-1}"
         echo "KOBO_LOG_LEVEL=${KOBO_LOG_LEVEL:-4}"
-        echo "KOBO_GLES_SCALE=${KOBO_GLES_SCALE:-2}"
+        echo "KOBO_GLES_SCALE=${KOBO_GLES_SCALE:-0}"
         echo "KOBO_GLES_LLVMPIPE=${KOBO_GLES_LLVMPIPE:-1}"
         echo "KOBO_LP_THREADS=${KOBO_LP_THREADS:-0}"
     } > "$RUN/shared/tuning"
@@ -904,7 +904,7 @@ gles_test() {
     out="$BASE/gles.txt"
     {
         echo "--- Mesa-Dateien:"; ls -l "$ROOTFS"/system/lib/egl/*_mesa.so "$ROOTFS"/system/lib/egl/dri/swrast_dri.so "$ROOTFS"/system/lib/libglapi.so.0 2>&1
-        echo "--- kobo-gles-test (erwartet GL_RENDERER=softpipe und OK):"
+        echo "--- kobo-gles-test (erwartet GL_RENDERER=llvmpipe oder softpipe und OK):"
         unset LD_LIBRARY_PATH
         chroot "$ROOTFS" /system/bin/sh -c 'export PATH=/system/bin:/system/xbin ANDROID_ROOT=/system ANDROID_DATA=/data LD_PRELOAD=/system/lib/libkobofb.so; exec /system/bin/kobo-gles-test' 2>&1
         echo "exit=$?"
