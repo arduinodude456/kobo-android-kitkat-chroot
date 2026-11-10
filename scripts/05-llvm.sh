@@ -85,7 +85,7 @@ ninja -C "$CROSS" -j"$JOBS" \
     LLVMMCJIT LLVMInterpreter LLVMExecutionEngine LLVMRuntimeDyld LLVMBitWriter \
     LLVMMCDisassembler LLVMARMCodeGen LLVMARMAsmPrinter LLVMARMAsmParser LLVMARMDisassembler \
     LLVMARMDesc LLVMARMInfo LLVMipo LLVMScalarOpts LLVMVectorize LLVMInstCombine LLVMAnalysis \
-    LLVMTransformUtils LLVMAggressiveInstCombine LLVMIRReader LLVMLinker LLVMObject LLVMProfileData \
+    LLVMTransformUtils LLVMIRReader LLVMLinker LLVMObject LLVMProfileData \
     LLVMInstrumentation LLVMCodeGen LLVMSelectionDAG LLVMAsmPrinter LLVMTarget LLVMMCParser LLVMMC \
     LLVMCore LLVMBinaryFormat LLVMSupport LLVMDemangle LLVMAsmParser
 
