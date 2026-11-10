@@ -198,6 +198,10 @@ apply_perf_tuning() {
     set_prop_file "$bp" dalvik.vm.checkjni false
     set_prop_file "$bp" dalvik.vm.heapminfree 1m
     set_prop_file "$bp" dalvik.vm.heapmaxfree 4m
+    # Dalvik-Heap pro App (F-Droid & Co. stuerzen sonst beim Verarbeiten grosser Indizes mit OutOfMemory ab).
+    set_prop_file "$bp" dalvik.vm.heapstartsize "${KOBO_HEAP_START:-8m}"
+    set_prop_file "$bp" dalvik.vm.heapgrowthlimit "${KOBO_HEAP_GROWTH:-128m}"
+    set_prop_file "$bp" dalvik.vm.heapsize "${KOBO_HEAP_SIZE:-256m}"
     rc="$ROOTFS/init.rc"
     if [ -f "$rc" ] && grep -q 'dalvik.vm.dexopt-flags' "$rc"; then
         tmp="$RUN/init.rc.perf"

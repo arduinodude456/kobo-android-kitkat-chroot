@@ -36,3 +36,8 @@ KOBO_GLES_SCALE=0
 # mehrere Raster-Threads), 0 = softpipe. KOBO_LP_THREADS = Anzahl Raster-Threads (0 = automatisch = Anzahl CPUs).
 KOBO_GLES_LLVMPIPE=1
 KOBO_LP_THREADS=0
+# Dalvik-Heap pro App. heapgrowthlimit gilt fuer normale Apps (vorher 48m, zu wenig fuer F-Droid-Index), heapsize fuer
+# Apps mit largeHeap. Wirkt beim naechsten "android.sh start" ohne neues Image. Bei Speicherknappheit kleiner stellen.
+KOBO_HEAP_START=8m
+KOBO_HEAP_GROWTH=128m
+KOBO_HEAP_SIZE=256m
