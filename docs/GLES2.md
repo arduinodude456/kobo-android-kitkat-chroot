@@ -51,9 +51,32 @@ wenigen Sekunden pro Bild. Maßnahmen im Build (`scripts/05-mesa.sh`):
   (alter Build: `MESA_ARCH="-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=softfp" MESA_OPT=-O2`).
 * Ohne NEON in `/proc/cpuinfo` lädt `kobo_egl.c` Mesa nicht, sondern bleibt bei `libGLES_android.so` (Log-Tag `kobo-egl`).
 
+* **Renderauflösung (`KOBO_GLES_SCALE`, Standard 2):** `mesa/platform_android_kobo.c` setzt für Fenster-Surfaces per
+  `NATIVE_WINDOW_SET_BUFFERS_DIMENSIONS` + `SCALE_TO_WINDOW` eine auf 1/N verkleinerte Puffergröße (wie `SurfaceHolder.setFixedSize`);
+  `eglQuerySurface` meldet die kleine Größe, SurfaceFlinger streckt das Bild. softpipe-Kosten sind ~proportional zur Pixelzahl:
+  2 = 4x weniger, 3 = 9x weniger Pixel. Einstellbar in `runtime/config`, per `KOBO_GLES_SCALE=…` in der Umgebung oder
+  `/dev/kobo/tuning`; 1 schaltet es ab. Nur ohne neues Mesa wirkt es nicht – `libEGL_mesa.so` muss neu gebaut werden.
+
 Das bringt erfahrungsgemäß nur einen Faktor von etwa 1,3 bis 2. Deutlich mehr bringt weniger Rendering-Arbeit in der App
 (kleinere Sichtweite, keine Schatten/Shader-Effekte, Texturfilter aus, 3D-Auflösung verringern, sofern die App das anbietet).
-Ein echter Sprung wäre nur mit llvmpipe (LLVM-JIT) möglich; das ist ein großer Cross-Build (LLVM für ARM32) und noch nicht umgesetzt.
+### llvmpipe (optional, ungetestet auf dem Gerät)
+
+Ein echter Sprung ist nur mit llvmpipe möglich: Shader und Rasterizer werden per LLVM-JIT zu NEON-Code kompiliert und auf
+allen CPU-Kernen (Raster-Threads) ausgeführt. Der Build ist **optional** und standardmäßig aus:
+
+* CI: Workflow „Run workflow“ → `llvmpipe` anhaken (Timeout 330 min; der LLVM-Prefix wird gecacht). Lokal: `MESA_LLVMPIPE=1 bash scripts/05-mesa.sh`
+  (ruft bei Bedarf `scripts/05-llvm.sh` auf).
+* `scripts/05-llvm.sh` baut LLVM 6.0.1 (Mesa 18.0.5 unterstützt höchstens 6.0) nur für ARM, statisch, ohne Tools, mit NDK r10e.
+  Dafür patcht `llvm/apply_patches.py` vier Stellen (gnustl 4.8 hat kein `std::call_once`/`std::to_string`/`<thread>`), LLVM läuft mit
+  `LLVM_ENABLE_THREADS=OFF` (`KOBO_LLVM_THREADS=1` probiert die pthread-Variante). Da das gebaute `llvm-config` auf dem Host nicht
+  läuft, liefert das Skript einen kleinen Wrapper, der nur Mesas configure-Fragen beantwortet.
+* `swrast_dri.so` enthält danach llvmpipe **und** softpipe. Laufzeit-Schalter (`runtime/config`): `KOBO_GLES_LLVMPIPE=0` → softpipe,
+  `KOBO_LP_THREADS=N` → Anzahl Raster-Threads (0 = alle CPUs). `GALLIUM_DRIVER` / `LP_NUM_THREADS` in der Umgebung haben Vorrang.
+* Erwartung/Nachteile: Rendern deutlich schneller (JIT + mehrere Kerne), dafür kostet das **Kompilieren jedes neuen Shaders** auf dem
+  Kobo spürbar Zeit (Mesas Shader-Cache ist hier aus), `swrast_dri.so` wird um viele MB größer und braucht mehr RAM.
+  Scheitert der JIT-Start (z. B. wegen `PROT_EXEC`), gibt es keinen automatischen Rückfall: dann `KOBO_GLES_LLVMPIPE=0`.
+* Geprüft (Host): Patch-Skript, `llvm-config`-Wrapper und Mesas configure mit LLVM (`HAVE_LLVM=0x0600`, llvmpipe aktiv). **Nicht**
+  geprüft: ARM-Cross-Build von LLVM/Mesa mit NDK r10e, `verify-mesa-elf.py` auf dem Ergebnis, JIT unter KitKat-bionic, FPS.
 
 ## Grenzen
 

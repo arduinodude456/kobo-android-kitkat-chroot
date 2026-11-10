@@ -30,6 +30,8 @@
 #include <dlfcn.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sync/sync.h>
@@ -179,6 +181,40 @@ static int
 droid_usage(void)
 {
    return GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Render scale                                                            */
+
+/* softpipe is a C rasterizer: the cost per frame is proportional to the number of
+ * pixels.  The e-ink panel (Kaleido, dithered to a few colours) hides a lower 3D
+ * resolution well, so window surfaces are rendered at 1/scale of the window size
+ * (like SurfaceHolder.setFixedSize) and SurfaceFlinger stretches the buffer.
+ * scale 1 = off.  Source: KOBO_GLES_SCALE (environment or /dev/kobo/tuning, read
+ * through libkobofb.so's kobo_tunable), default 2 (= 4x fewer pixels). */
+static int
+droid_render_scale(void)
+{
+   static int cached;
+   int (*tunable)(const char *, int);
+   int scale = 2;
+
+   if (cached)
+      return cached;
+   tunable = (int (*)(const char *, int)) dlsym(RTLD_DEFAULT, "kobo_tunable");
+   if (tunable) {
+      scale = tunable("KOBO_GLES_SCALE", 2);
+   } else {
+      const char *e = getenv("KOBO_GLES_SCALE");
+      if (e && *e)
+         scale = atoi(e);
+   }
+   if (scale < 1)
+      scale = 1;
+   if (scale > 4)
+      scale = 4;
+   cached = scale;
+   return scale;
 }
 
 static EGLBoolean
@@ -426,6 +462,21 @@ droid_create_surface(_EGLDriver *drv, _EGLDisplay *disp, EGLint type,
 
       window->query(window, NATIVE_WINDOW_DEFAULT_WIDTH, &dri2_surf->base.Width);
       window->query(window, NATIVE_WINDOW_DEFAULT_HEIGHT, &dri2_surf->base.Height);
+
+      /* Render smaller, let SurfaceFlinger scale up (see droid_render_scale). */
+      {
+         int scale = droid_render_scale();
+         int w = (dri2_surf->base.Width + scale - 1) / scale;
+         int h = (dri2_surf->base.Height + scale - 1) / scale;
+
+         if (scale > 1 && w >= 160 && h >= 160 &&
+             !window->perform(window, NATIVE_WINDOW_SET_BUFFERS_DIMENSIONS, w, h)) {
+            window->perform(window, NATIVE_WINDOW_SET_SCALING_MODE,
+                            NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW);
+            dri2_surf->base.Width = w;
+            dri2_surf->base.Height = h;
+         }
+      }
    }
 
    config = dri2_get_dri_config(dri2_conf, type, dri2_surf->base.GLColorspace);
@@ -624,6 +675,30 @@ static const __DRIextension *droid_swrast_loader_extensions[] = {
    NULL,
 };
 
+/* swrast_dri.so contains llvmpipe (LLVM JIT, multithreaded) when it was built with MESA_LLVMPIPE=1, and
+ * always softpipe.  Mesa picks the driver from GALLIUM_DRIVER (default: llvmpipe if present) and the rasterizer
+ * thread count from LP_NUM_THREADS (default: number of CPUs).  Both can be set from the Kobo tuning:
+ *   KOBO_GLES_LLVMPIPE=0  -> softpipe        KOBO_LP_THREADS=N  -> N rasterizer threads (0 = automatic)
+ * A GALLIUM_DRIVER / LP_NUM_THREADS already in the environment always wins. */
+static void
+droid_configure_swrast(void)
+{
+   int (*tunable)(const char *, int) = (int (*)(const char *, int)) dlsym(RTLD_DEFAULT, "kobo_tunable");
+   int llvmpipe = 1, threads = 0;
+   char buf[16];
+
+   if (tunable) {
+      llvmpipe = tunable("KOBO_GLES_LLVMPIPE", 1);
+      threads = tunable("KOBO_LP_THREADS", 0);
+   }
+   if (!llvmpipe)
+      setenv("GALLIUM_DRIVER", "softpipe", 0);
+   if (threads > 0 && threads <= 16) {
+      snprintf(buf, sizeof buf, "%d", threads);
+      setenv("LP_NUM_THREADS", buf, 0);
+   }
+}
+
 EGLBoolean
 dri2_initialize_android(_EGLDriver *drv, _EGLDisplay *disp)
 {
@@ -648,6 +723,7 @@ dri2_initialize_android(_EGLDriver *drv, _EGLDisplay *disp)
       goto cleanup;
    }
 
+   droid_configure_swrast();
    dri2_dpy->driver_name = strdup("swrast");
    if (!dri2_dpy->driver_name || !dri2_load_driver_swrast(disp)) {
       err = "swrast: failed to load swrast_dri.so";

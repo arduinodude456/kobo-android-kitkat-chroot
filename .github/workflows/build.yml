@@ -8,6 +8,10 @@ on:
         type: choice
         default: '19'
         options: ['19']
+      llvmpipe:
+        description: 'Mesa mit llvmpipe (LLVM 6.0.1 ARM-Cross-Build, dauert lange, ungetestet) statt nur softpipe'
+        type: boolean
+        default: false
   push:
     branches: [main]
   pull_request:
@@ -47,9 +51,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     needs: validate
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: ${{ inputs.llvmpipe && 330 || 45 }}
     env:
       JOBS: '2'
+      MESA_LLVMPIPE: ${{ inputs.llvmpipe && '1' || '0' }}
       ROOTFS_SIZE_MIB: '2048'
       ANDROID_API: ${{ inputs.android_api || '19' }}
     steps:
@@ -63,7 +68,19 @@ jobs:
         run: |
           set -o pipefail
           bash scripts/00-prebuilt-sdk.sh 2>&1 | tee build-prebuilt.log
-      - name: Cross-build Mesa softpipe GLES2/EGL for the chroot
+      - name: Restore cached LLVM (llvmpipe only)
+        if: ${{ inputs.llvmpipe }}
+        uses: actions/cache@v4
+        with:
+          path: build/llvm/prefix
+          key: llvm-6.0.1-arm-${{ hashFiles('scripts/05-llvm.sh', 'llvm/apply_patches.py') }}
+      - name: Cross-build LLVM 6.0.1 for llvmpipe (ARM only, static; llvmpipe only)
+        if: ${{ inputs.llvmpipe }}
+        run: |
+          set -o pipefail
+          sudo apt-get install -y cmake ninja-build bzip2
+          bash scripts/05-llvm.sh 2>&1 | tee build/logs/llvm.log
+      - name: Cross-build Mesa (softpipe, plus llvmpipe if selected) GLES2/EGL for the chroot
         run: |
           set -o pipefail
           sudo apt-get install -y flex bison pkg-config python3-mako git

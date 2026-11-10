@@ -25,8 +25,16 @@ W="$BUILD/mesa"
 DEPS="$W/deps"
 OUT="$W/out"
 JOBS_MESA="${JOBS:-2}"
+# llvmpipe (LLVM-JIT, multithreaded) instead of softpipe: MESA_LLVMPIPE=1 builds LLVM first (scripts/05-llvm.sh).
+# softpipe stays in the same swrast_dri.so, so KOBO_GLES_LLVMPIPE=0 at runtime still selects it.
+MESA_LLVMPIPE="${MESA_LLVMPIPE:-0}"
+LLVM_PREFIX="${LLVM_PREFIX:-$BUILD/llvm/prefix}"
 
 [[ -f "$NDK_ZIP" && -d "$PRODUCT/system/lib" ]] || { echo 'run scripts/00-prebuilt-sdk.sh first' >&2; exit 1; }
+if [[ "$MESA_LLVMPIPE" = 1 ]]; then
+    [[ -x "$LLVM_PREFIX/bin/llvm-config" && -f "$LLVM_PREFIX/.complete" ]] || bash "$ROOT/scripts/05-llvm.sh"
+    export LLVM_CONFIG="$LLVM_PREFIX/bin/llvm-config"
+fi
 unzip -q -o "$NDK_ZIP" 'android-ndk-r10e/sources/cxx-stl/gnu-libstdc++/4.8/*' \
     'android-ndk-r10e/platforms/android-19/arch-arm/usr/include/*' -d "$NDK_DIR"
 for lib in libhardware libcutils libsync liblog; do
@@ -127,13 +135,18 @@ done
 printf 'Name: zlib\nDescription: zlib\nVersion: 1.2.8\nLibs: -lz\nCflags:\n' > "$DEPS/lib/pkgconfig/zlib.pc"
 
 # --- Mesa -------------------------------------------------------------------
+if [[ "$MESA_LLVMPIPE" = 1 ]]; then
+    LLVM_ARGS=(--enable-llvm --disable-llvm-shared-libs --with-llvm-prefix="$LLVM_PREFIX")
+else
+    LLVM_ARGS=(--disable-llvm --disable-llvm-shared-libs)
+fi
 mkdir -p "$W/build" && cd "$W/build"
 "$MESA_SRC/configure" --host=$TRIPLE --build="$(gcc -dumpmachine)" \
     --prefix=/system --libdir=/system/lib \
     --with-dri-driverdir=/system/lib/egl/dri \
     --with-platforms=android --enable-egl --enable-gles1 --enable-gles2 \
     --enable-shared-glapi --enable-dri --with-gallium-drivers=swrast --with-dri-drivers= \
-    --disable-gallium-llvm --disable-llvm-shared-libs \
+    "${LLVM_ARGS[@]}" \
     --disable-glx --disable-glx-tls --disable-gbm --disable-dri3 --disable-xa --disable-xvmc \
     --disable-vdpau --disable-va --disable-omx-bellagio --disable-opencl --disable-nine \
     --disable-osmesa --disable-libunwind --disable-valgrind --disable-asm

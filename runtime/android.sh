@@ -220,6 +220,9 @@ write_tuning() {
     {
         echo "KOBO_NOSYNC=${KOBO_NOSYNC:-1}"
         echo "KOBO_LOG_LEVEL=${KOBO_LOG_LEVEL:-4}"
+        echo "KOBO_GLES_SCALE=${KOBO_GLES_SCALE:-2}"
+        echo "KOBO_GLES_LLVMPIPE=${KOBO_GLES_LLVMPIPE:-1}"
+        echo "KOBO_LP_THREADS=${KOBO_LP_THREADS:-0}"
     } > "$RUN/shared/tuning"
     chmod 0644 "$RUN/shared/tuning"
 }

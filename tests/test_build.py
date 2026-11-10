@@ -117,7 +117,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertLess(prebuilt, rootfs)
         self.assertLess(rootfs, package)
         self.assertIn("if: github.event_name == 'workflow_dispatch'", workflow)
-        self.assertIn('timeout-minutes: 45', workflow)
+        # 45 min normally; the optional llvmpipe build (LLVM cross-build) gets a longer limit.
+        self.assertIn('|| 45 }}', workflow)
         self.assertIn('kobo-android-kitkat-arm32-${{ github.sha }}', workflow)
         self.assertIn("options: ['19']", workflow)
         self.assertNotIn("options: ['19', '21']", workflow)

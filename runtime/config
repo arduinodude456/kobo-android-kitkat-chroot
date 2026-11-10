@@ -28,3 +28,10 @@ KOBO_LOG_LEVEL=4
 KOBO_DEXOPT_REBUILD=1
 # Sekunden zwischen den Diagnose-Schnappschuessen (logcat.txt, crash.txt) nach dem Boot.
 KOBO_DIAG_INTERVAL=15
+# OpenGL-ES-2-Renderaufloesung (Mesa/softpipe): Fenster-Surfaces werden mit 1/N der Fenstergroesse gerendert
+# und von SurfaceFlinger hochskaliert. 2 = 4x weniger Pixel (ca. 2-4x mehr FPS), 3 = 9x, 1 = aus (volle Aufloesung).
+KOBO_GLES_SCALE=2
+# llvmpipe (nur wenn das Image mit MESA_LLVMPIPE=1 gebaut wurde; sonst gibt es nur softpipe): 1 = llvmpipe (LLVM-JIT,
+# mehrere Raster-Threads), 0 = softpipe. KOBO_LP_THREADS = Anzahl Raster-Threads (0 = automatisch = Anzahl CPUs).
+KOBO_GLES_LLVMPIPE=1
+KOBO_LP_THREADS=0
