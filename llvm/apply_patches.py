@@ -17,6 +17,10 @@ EDITS = [
     # std::to_string is missing in gnustl 4.8 (only used by the ASan pass, which IPO links in).
     (Path('lib/Transforms/Instrumentation/AddressSanitizer.cpp'),
      r'std::to_string\(GetAsanVersion\(M\)\)', 'utostr(GetAsanVersion(M))'),
+    # bionic API 19 does not declare strtold(); long double is 64 bit on ARM, so strtod is equivalent.
+    (Path('include/llvm/ADT/StringExtras.h'),
+     r'return detail::to_float\(T, Num, strtold\);',
+     'return detail::to_float<long double>(T, Num, [](const char *S, char **E) -> long double { return strtod(S, E); });'),
 ]
 
 # <thread>/<future> based helpers are not needed by Mesa and do not build with gnustl 4.8.  CMake insists

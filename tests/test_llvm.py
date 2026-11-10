@@ -15,6 +15,7 @@ def fake_llvm_tree(root, patch=1):
         'CMakeLists.txt': 'set(LLVM_VERSION_MAJOR 6)\nset(LLVM_VERSION_MINOR 0)\nset(LLVM_VERSION_PATCH %d)\n' % patch,
         'include/llvm/Support/Threading.h': '#elif defined(LLVM_ON_UNIX) &&   \\\n    (defined(_LIBCPP_VERSION))\n',
         'lib/Transforms/Instrumentation/AddressSanitizer.cpp': 'x = p + std::to_string(GetAsanVersion(M));\n',
+        'include/llvm/ADT/StringExtras.h': 'inline bool to_float(const Twine &T, long double &Num) {\n  return detail::to_float(T, Num, strtold);\n}\n',
         'lib/Support/ThreadPool.cpp': '#include <thread>\n',
         'lib/Support/Parallel.cpp': '#include <thread>\n',
         'lib/CodeGen/ParallelCG.cpp': '#include "x"\n',
@@ -39,6 +40,7 @@ class LlvmTests(unittest.TestCase):
                 subprocess.run(['python3', str(PATCHER), d], check=True, capture_output=True)
             self.assertIn('#elif 0 && defined(LLVM_ON_UNIX)', (Path(d) / 'include/llvm/Support/Threading.h').read_text())
             self.assertIn('utostr(GetAsanVersion(M))', (Path(d) / 'lib/Transforms/Instrumentation/AddressSanitizer.cpp').read_text())
+            self.assertNotIn('strtold', (Path(d) / 'include/llvm/ADT/StringExtras.h').read_text())
             self.assertNotIn('<thread>', (Path(d) / 'lib/Support/ThreadPool.cpp').read_text())
 
     def test_patcher_refuses_other_version(self):
