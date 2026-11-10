@@ -8,7 +8,7 @@ einer eigenen Android-EGL-Plattform (`mesa/platform_android_kobo.c`).
 
 | Teil | Zweck |
 | --- | --- |
-| `scripts/05-mesa.sh` | Cross-Build (NDK r10e, gcc 4.8) von Mesa + expat; installiert `libEGL_mesa.so`, `libGLESv1_CM_mesa.so`, `libGLESv2_mesa.so`, `libglapi.so.0`, `egl/dri/swrast_dri.so`, `kobo-gles-test` |
+| `scripts/05-mesa.sh` | Cross-Build (NDK r10e, gcc 4.8) von Mesa + expat; installiert `libEGL_mesa.so`, `libGLESv1_CM_mesa.so`, `libGLESv2_mesa.so`, `libglapi.so.0` sowie den benötigten `libglapi.so`-SONAME-Alias, `egl/dri/swrast_dri.so`, `kobo-gles-test` |
 | `mesa/platform_android_kobo.c` | Ersetzt Mesas `platform_android.c` (das DRM-Gralloc braucht). Rendert per swrast und kopiert Frames über `dequeueBuffer` → gralloc `lock` → Pixelkonvertierung → `queueBuffer` |
 | `native/kobo_egl.c` | In `libkobofb.so`: wählt je Prozess die EGL-Implementierung |
 | `ro.opengles.version=131072` | meldet ES 2.0, damit Chrome/Firefox-APKs installierbar sind |

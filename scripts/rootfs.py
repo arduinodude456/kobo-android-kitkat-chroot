@@ -51,6 +51,8 @@ def validate(stage):
         if not (stage / name).is_file():
             raise ValueError('missing Mesa GLES2 component (run scripts/05-mesa.sh): ' + name)
         arm_elf(stage / name)
+    if not (stage / 'system/lib/libglapi.so').is_file():
+        raise ValueError('missing Mesa GLES2 SONAME alias: system/lib/libglapi.so')
     for name in ('kobo-vnc', 'kobo-container', 'vold'):
         arm_elf(stage / 'system/bin' / name, static=True)
     arm_elf(stage / 'sbin/healthd')

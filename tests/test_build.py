@@ -103,6 +103,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('${ROOTFS_SIZE_MIB:-2048}', build)
         self.assertIn("type=int, default=2048", generator)
 
+    def test_mesa_installs_the_glapi_needed_soname(self):
+        build = (ROOT / 'scripts/05-mesa.sh').read_text()
+        rootfs = (ROOT / 'scripts/rootfs.py').read_text()
+        self.assertIn('ln -sfn libglapi.so.0 "$PRODUCT/system/lib/libglapi.so"', build)
+        self.assertIn("stage / 'system/lib/libglapi.so'", rootfs)
+
     def test_prebuilt_image_workflow_skips_full_aosp_build(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
         prebuilt = workflow.index('scripts/00-prebuilt-sdk.sh')

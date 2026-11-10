@@ -142,6 +142,9 @@ inst "$(readlink -f "$L/libEGL.so")"        "$PRODUCT/system/lib/egl/libEGL_mesa
 inst "$(readlink -f "$L/libGLESv1_CM.so")"  "$PRODUCT/system/lib/egl/libGLESv1_CM_mesa.so"
 inst "$(readlink -f "$L/libGLESv2.so")"     "$PRODUCT/system/lib/egl/libGLESv2_mesa.so"
 inst "$(readlink -f "$L/libglapi.so")"      "$PRODUCT/system/lib/libglapi.so.0"
+# Mesa records the unversioned SONAME in DT_NEEDED. Keep the runtime's .so.0
+# name and provide the SONAME path expected by KitKat's dynamic linker too.
+sudo ln -sfn libglapi.so.0 "$PRODUCT/system/lib/libglapi.so"
 inst "$L/egl/dri/swrast_dri.so"             "$PRODUCT/system/lib/egl/dri/swrast_dri.so"
 
 # Fail the build now if the KitKat linker could not dlopen() these libraries (missing NEEDED lib,
