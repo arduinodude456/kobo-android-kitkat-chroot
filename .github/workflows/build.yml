@@ -73,7 +73,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: build/llvm/prefix
-          key: llvm-6.0.1-arm-${{ hashFiles('scripts/05-llvm.sh', 'llvm/apply_patches.py') }}
+          key: llvm-6.0.1-arm-${{ hashFiles('scripts/05-llvm.sh', 'llvm/apply_patches.py', 'scripts/05-llvm-extra.sh') }}
+          restore-keys: |
+            llvm-6.0.1-arm-
       - name: Cross-build LLVM 6.0.1 for llvmpipe (ARM only, static; llvmpipe only)
         id: llvm
         if: ${{ inputs.llvmpipe }}
@@ -82,15 +84,22 @@ jobs:
           set -o pipefail
           sudo apt-get install -y cmake ninja-build bzip2
           bash scripts/05-llvm.sh 2>&1 | tee build/logs/llvm.log
+      - name: Add extra LLVM libraries (CodeView, MSF, DWARF, GlobalISel; minutes, not hours)
+        id: llvm_extra
+        if: ${{ inputs.llvmpipe && steps.llvm.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          bash scripts/05-llvm-extra.sh 2>&1 | tee build/logs/llvm-extra.log
       - name: Save LLVM cache right after its build (so a later Mesa failure does not lose hours of work)
-        if: ${{ inputs.llvmpipe && steps.llvm.outcome == 'success' && steps.llvm_cache.outputs.cache-hit != 'true' }}
+        if: ${{ inputs.llvmpipe && steps.llvm_extra.outcome == 'success' && steps.llvm_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: build/llvm/prefix
-          key: llvm-6.0.1-arm-${{ hashFiles('scripts/05-llvm.sh', 'llvm/apply_patches.py') }}
+          key: llvm-6.0.1-arm-${{ hashFiles('scripts/05-llvm.sh', 'llvm/apply_patches.py', 'scripts/05-llvm-extra.sh') }}
       - name: Cross-build Mesa with llvmpipe (+ softpipe) GLES2/EGL for the chroot
         id: mesa_llvm
-        if: ${{ inputs.llvmpipe && steps.llvm.outcome == 'success' }}
+        if: ${{ inputs.llvmpipe && steps.llvm_extra.outcome == 'success' }}
         continue-on-error: true
         env:
           MESA_LLVMPIPE: '1'
