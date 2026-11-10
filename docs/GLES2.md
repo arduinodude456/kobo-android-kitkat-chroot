@@ -98,6 +98,8 @@ Was der Mesa-Patch (`mesa/apply_patches.py`, `lp_bld_misc.cpp`) am JIT aendert:
 
 * JIT-Symbole (`sinf`, `powf`, `memcpy`, ...) werden direkt per `dlopen`/`dlsym` aus libm/libc aufgeloest – unabhaengig davon, ob das
   quergebaute LLVM `HAVE_DLOPEN` hatte. `__aeabi_*` kommen weiter aus LLVMs eigener libgcc-Tabelle.
+* `__aeabi_unwind_cpp_pr0/1/2` (ARM-Unwind-Tabellen im JIT-Code, von bionic nicht exportiert) bekommen einen Stub. Ohne ihn endete jede GLES2-App
+  mit `LLVM ERROR: Program used external function '__aeabi_unwind_cpp_pr1' which could not be resolved!` (gemessen auf dem Kobo, Minetest).
 * Meldet LLVM den Kern als `generic` (unbekannte CPU-Kennung), rechnet der JIT sonst als ARMv4T ohne VFP/NEON; jetzt wird `cortex-a15`
   (NEON, VFPv4, Hardware-Division) genommen. Mit `GALLIVM_MCPU=<kern>` in der Umgebung ueberschreibbar.
 
