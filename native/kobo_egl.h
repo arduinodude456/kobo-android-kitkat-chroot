@@ -18,6 +18,8 @@
  * plus the on-device test binary.  all_apps == 0: only the known browsers
  * (legacy behaviour, switchable with KOBO_GLES_APPS=0). */
 int kobo_egl_process_wants_mesa(const char *process, int all_apps);
+/* 1, wenn /proc/cpuinfo-artige Datei NEON meldet (oder kein Features-Feld hat); 0 sonst. */
+int kobo_cpu_has_neon(const char *cpuinfo_path);
 
 /* Returns the forced property value, or NULL when the real value must be used.
  * mesa_usable: the Mesa libraries exist AND could be dlopen()ed in this process. */

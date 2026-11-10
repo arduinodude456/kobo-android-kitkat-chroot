@@ -88,7 +88,15 @@ ARCH_FLAGS="-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=softfp"
 CPPF="--sysroot=$SYSROOT -I$DEPS/include -I$STL/include -I$STL/libs/armeabi-v7a/include -D__ANDROID_API__=19 -include $DEPS/include/kobo_compat.h"
 export CC="$TRIPLE-gcc" CXX="$TRIPLE-g++" AR="$TRIPLE-ar" RANLIB="$TRIPLE-ranlib" STRIP="$TRIPLE-strip"
 export CC_FOR_BUILD=gcc CXX_FOR_BUILD=g++ CPPFLAGS_FOR_BUILD= CFLAGS_FOR_BUILD=-O1 CXXFLAGS_FOR_BUILD=-O1 LDFLAGS_FOR_BUILD=
-export CFLAGS="$ARCH_FLAGS -O2 -fPIC $CPPF" CXXFLAGS="$ARCH_FLAGS -O2 -fPIC -fno-rtti -fno-exceptions $CPPF"
+# Mesa-Optimierung: softpipe ist reiner C-Code (kein LLVM-JIT) und war bisher ohne NEON und mit -O2
+# gebaut. Der Kobo (Cortex-A53, 32-Bit-Userland) hat NEON/VFPv3-D32: mit -mfpu=neon rechnet der
+# Compiler Float-Code (Vertex-/Fragment-Interpreter, Rasterizer) deutlich schneller, -fno-math-errno
+# erlaubt inline-vsqrt statt libm-Aufrufen. Der ABI bleibt softfp (kompatibel zu den Systembibliotheken).
+# Ohne NEON-CPU faellt kobo_egl.c zur Laufzeit auf libGLES_android.so zurueck (siehe cpu_has_neon).
+# Ueberschreibbar: MESA_ARCH / MESA_OPT (z. B. MESA_ARCH="$ARCH_FLAGS" MESA_OPT=-O2 fuer den alten Build).
+MESA_ARCH="${MESA_ARCH:--march=armv7-a -mfpu=neon -mfloat-abi=softfp -mtune=cortex-a15}"
+MESA_OPT="${MESA_OPT:--O3 -fno-math-errno -fno-trapping-math -fomit-frame-pointer}"
+export CFLAGS="$MESA_ARCH $MESA_OPT -fPIC $CPPF" CXXFLAGS="$MESA_ARCH $MESA_OPT -fPIC -fno-rtti -fno-exceptions $CPPF"
 export LDFLAGS="--sysroot=$SYSROOT -L$DEPS/lib -L$PRODUCT/system/lib -L$STL/libs/armeabi-v7a -Wl,--no-undefined -Wl,-rpath-link=$PRODUCT/system/lib"
 export LIBS="-lgnustl_static -llog -ldl"
 export PKG_CONFIG_PATH="$DEPS/lib/pkgconfig" PKG_CONFIG_LIBDIR="$DEPS/lib/pkgconfig"

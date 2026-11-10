@@ -41,6 +41,27 @@ size_t kv_volume_line(const char *cmd, const char *path, char *out, size_t cap)
     return (size_t)n;
 }
 
+/* "<seq> volume mkdirs <pfad>": liefert den Zielpfad, wenn er unter dem Volume <vol> liegt und kein ".."
+ * enthaelt (sonst 0). Echtes vold legt die Verzeichnisse an; MountService.mkdirs() ruft das fuer
+ * Android/data/<paket>/files auf. Ohne Anlegen erzeugt die erste App die Ordner mit umask 077 (0700). */
+size_t kv_mkdirs_path(const char *cmd, const char *vol, char *out, size_t cap)
+{
+    static const char key[] = " volume mkdirs ";
+    size_t i = 0, vl, pl;
+    const char *p;
+    while (cmd[i] >= '0' && cmd[i] <= '9') i++;
+    if (i == 0 || strncmp(cmd + i, key, sizeof key - 1) != 0 || !vol || vol[0] != '/') return 0;
+    p = cmd + i + sizeof key - 1;
+    vl = strlen(vol);
+    if (strncmp(p, vol, vl) != 0 || (p[vl] != '/' && p[vl] != 0)) return 0;
+    if (strstr(p, "..")) return 0;
+    pl = strlen(p);
+    while (pl > 1 && p[pl - 1] == '/') pl--;
+    if (pl == 0 || pl >= cap) return 0;
+    memcpy(out, p, pl); out[pl] = 0;
+    return pl;
+}
+
 #ifndef KOBO_VOLD_TEST
 #include <errno.h>
 #include <fcntl.h>
@@ -73,6 +94,39 @@ static void load_volumes(void)
     }
 }
 
+/* Legt <path> rekursiv an: alle Ebenen ab dem Volume mit 0777 (umask-unabhaengig, wie FAT-Speicher).
+ * Ordner unterhalb von Android/data|obb/<paket> gehoeren der uid der App (aus /data/data/<paket>). */
+static int make_dirs(const char *vol, const char *path)
+{
+    char cur[256]; size_t vl = strlen(vol), n = strlen(path), i;
+    unsigned uid = 0; int have_uid = 0; char pkg[128]; pkg[0] = 0;
+    const char *a = strstr(path + vl, "/Android/data/");
+    if (!a) a = strstr(path + vl, "/Android/obb/");
+    if (a) {
+        const char *q = strchr(a + 1, '/'); q = q ? strchr(q + 1, '/') : 0;   /* hinter Android/data/ */
+        if (q) {
+            const char *e = strchr(q + 1, '/'); size_t l = e ? (size_t)(e - (q + 1)) : strlen(q + 1);
+            if (l > 0 && l < sizeof pkg) {
+                char dd[200]; struct stat st;
+                memcpy(pkg, q + 1, l); pkg[l] = 0;
+                snprintf(dd, sizeof dd, "/data/data/%s", pkg);
+                if (stat(dd, &st) == 0) { uid = st.st_uid; have_uid = 1; }
+            }
+        }
+    }
+    if (n >= sizeof cur) return -1;
+    for (i = vl; i <= n; i++) {
+        if (path[i] != '/' && path[i] != 0) continue;
+        if (i == vl) continue;
+        memcpy(cur, path, i); cur[i] = 0;
+        if (mkdir(cur, 0777) == 0) {
+            chmod(cur, 0777);
+            if (have_uid && pkg[0] && strstr(cur, pkg)) chown(cur, uid, uid);
+        } else if (errno != EEXIST) return -1;
+    }
+    return 0;
+}
+
 static void handle(int c)
 {
     char buf[1024]; size_t len = 0;
@@ -91,6 +145,16 @@ static void handle(int c)
                         n = kv_volume_line(cmd, vols[v], rep, sizeof rep - 1);
                         if (n) { rep[n] = 0; if (write(c, rep, n + 1) < 0) return; }
                     }
+                {   /* volume mkdirs: wirklich anlegen, Fehler als 400 melden */
+                    char dp[256]; int done = 0, ok = 1;
+                    for (v = 0; v < nvols && !done; v++)
+                        if (kv_mkdirs_path(cmd, vols[v], dp, sizeof dp)) { done = 1; ok = make_dirs(vols[v], dp) == 0; }
+                    if (done && !ok) {
+                        n = (size_t)snprintf(rep, sizeof rep - 1, "400 %.*s Failed to create dirs", (int)sl, cmd);
+                        if (write(c, rep, n + 1) < 0) return;
+                        start = i + 1; continue;
+                    }
+                }
                 n = kv_reply(cmd, rep, sizeof rep - 1);
                 if (n) { rep[n] = 0; if (write(c, rep, n + 1) < 0) return; }
                 start = i + 1;

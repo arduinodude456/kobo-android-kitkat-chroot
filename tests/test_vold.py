@@ -9,7 +9,7 @@ C = r'''
 #include "../native/kobo_vold.c"
 #define CK(c) do { if (!(c)) { printf("FAIL %d\n", __LINE__); return 1; } } while (0)
 int main(void) {
-    char o[96];
+    char o[160];
     CK(kv_reply("1 volume list", o, sizeof o) > 0); CK(!strcmp(o, "200 1 Volumes listed."));
     CK(kv_reply("42 asec list", o, sizeof o) > 0); CK(!strcmp(o, "200 42 Command succeeded"));
     CK(kv_reply("7", o, sizeof o) > 0); CK(!strcmp(o, "200 7 Command succeeded"));
@@ -18,6 +18,12 @@ int main(void) {
     CK(kv_volume_line("1 volume list", "/storage/emulated/legacy", o, sizeof o) > 0);
     CK(!strcmp(o, "110 1 sdcard /storage/emulated/legacy 4"));
     CK(kv_volume_line("1 volume list", "nope", o, sizeof o) == 0);
+    CK(kv_mkdirs_path("5 volume mkdirs /storage/sdcard/Android/data/a.b/files/", "/storage/sdcard", o, sizeof o) > 0);
+    CK(!strcmp(o, "/storage/sdcard/Android/data/a.b/files"));
+    CK(kv_mkdirs_path("5 volume mkdirs /storage/sdcard/../data", "/storage/sdcard", o, sizeof o) == 0);
+    CK(kv_mkdirs_path("5 volume mkdirs /data/data/x", "/storage/sdcard", o, sizeof o) == 0);
+    CK(kv_mkdirs_path("5 volume mkdirs /storage/sdcard2/x", "/storage/sdcard", o, sizeof o) == 0);
+    CK(kv_mkdirs_path("5 volume list", "/storage/sdcard", o, sizeof o) == 0);
     puts("ok"); return 0;
 }'''
 @unittest.skipUnless(CC, "gcc fehlt")

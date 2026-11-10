@@ -421,6 +421,31 @@ cleanup() {
     rm -f "$RUN/runner.pid" "$RUN/container.pid" "$RUN/vnc.pid" "$RUN/ready"
     if [ "$unmount_failed" = 0 ]; then rmdir "$RUN/lock" 2>/dev/null || true; fi
 }
+# ---- Gemeinsamer Speicher (/storage/sdcard) ----------------------------------------------------------
+# Auf echten Geraeten legt vold/sdcard-FUSE Android/data/<paket> mit passenden Rechten an. Hier legt die
+# erste App, die schreibt, Android/ und Android/data selbst an -- mit umask 077, also 0700 und nur fuer
+# ihre uid. Jede weitere App (Minetest, Editor, ...) bekommt dann "EACCES (Permission denied)". Nach
+# Neuinstallation einer App hat sie ausserdem eine neue uid, waehrend ihr alter Ordner der alten uid
+# gehoert. Beides wird bei jedem Start vom Host (root) repariert; das Image bleibt unveraendert nutzbar.
+fix_storage_perms() {
+    S="$ROOTFS/storage/sdcard"
+    [ -d "$S" ] || mkdir -p "$S"
+    mkdir -p "$S/Android/data" "$S/Android/obb" "$S/Download" "$S/Documents" 2>/dev/null
+    chmod 0777 "$S" "$S/Android" "$S/Android/data" "$S/Android/obb" "$S/Download" "$S/Documents" 2>/dev/null || true
+    for base in "$S/Android/data" "$S/Android/obb"; do
+        for d in "$base"/*; do
+            [ -d "$d" ] || continue
+            pkg=${d##*/}
+            ids=$(ls -ldn "$ROOTFS/data/data/$pkg" 2>/dev/null | awk '{print $3 ":" $4}')
+            [ -n "$ids" ] || continue            # App nicht installiert: Ordner unveraendert lassen
+            cur=$(ls -ldn "$d" 2>/dev/null | awk '{print $3 ":" $4}')
+            if [ "$cur" != "$ids" ]; then
+                chown -R "$ids" "$d" 2>/dev/null && echo "Speicher: $pkg -> uid:gid $ids (war $cur)"
+            fi
+            chmod -R u+rwX "$d" 2>/dev/null || true
+        done
+    done
+}
 install_bundled_apps() {
     apps="$BASE/apps"
     [ -d "$apps" ] || return 0
@@ -614,6 +639,7 @@ run() {
     rootfs_mount
     [ -f "$ROOTFS/kobo-chroot" ] && [ "$(cat "$ROOTFS/kobo-chroot")" = 'android-kitkat_api19' ] || fail 'Falsches Rootfs: KitKat/API-19-Image erforderlich. Altes rootfs.img sichern, entfernen und neu installieren.'
     install_bundled_apps
+    fix_storage_perms
     CHROOT_BIN=$(command -v chroot) || fail 'chroot nicht gefunden.'
     ENV_BIN=$(command -v env) || fail 'env nicht gefunden.'
     ENVB="$ENV_BIN"

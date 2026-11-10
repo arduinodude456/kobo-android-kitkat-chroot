@@ -68,31 +68,56 @@ local function u32(s, i) local a,b,c,d=s:byte(i,i+3); return ((a*256+b)*256+c)*2
 local function p16(v) return string.char(math.floor(v/256)%256, v%256) end
 local function p32(v) return p16(math.floor(v/65536)%65536)..p16(v%65536) end
 local RFB = {}; RFB.__index = RFB
--- 1-Bit-Dithering je Farbkanal (2x2-Bayer, Schwellen wie bisher). Statt pro Pixel drei
--- Vergleiche in Lua auszufuehren, gibt es je Phase (dx%2, dy%2) eine Tabelle
--- RGB565 -> fertiges RGB32-Pixel (acht erlaubte Farben). Pro Ausgabepixel bleibt ein
--- einziger Tabellenzugriff.
+-- 1-Bit-Dithering je Farbkanal (4x4-Bayer) mit Farbaufbereitung. Ausgabe bleiben die acht
+-- Panel-Farben (nur so bleibt der schnelle E-Ink-Modus schnell), aber:
+--  * 4x4 statt 2x2 Bayer = 17 statt 5 Helligkeitsstufen pro Kanal (weichere Farbverlaeufe),
+--  * Saettigung, Gamma und Kontrast werden einmalig in die Tabelle eingerechnet (kostenlos zur
+--    Laufzeit), dadurch kraeftigere Farben,
+--  * die Tabelle ist nach RGB444 indiziert (16 Phasen x 4096 Eintraege = 256 KB, passt in den
+--    Cache) statt 4 x 65536 Eintraege. Pro Ausgabepixel bleibt ein Tabellenzugriff.
+-- Feintuning ohne Neubau: Datei <BASE>/color.conf mit z.B. "sat=1.7 gamma=1.3 contrast=1.1".
 local bit=require("bit")
-local DITHER_THRESHOLDS={32,160,224,96}
+local BAYER4={0,8,2,10, 12,4,14,6, 3,11,1,9, 15,7,13,5}
+local COLOR_DEFAULTS={sat=1.6,gamma=1.3,contrast=1.1}
+local function load_color_params()
+    local prm={sat=COLOR_DEFAULTS.sat,gamma=COLOR_DEFAULTS.gamma,contrast=COLOR_DEFAULTS.contrast}
+    local f=io.open(BASE.."/color.conf","rb")
+    if f then
+        local txt=f:read("*a") or ""; f:close()
+        for k,v in txt:gmatch("(%a+)%s*=%s*([%d%.]+)") do
+            local n=tonumber(v)
+            if prm[k]~=nil and n and n>0 and n<=4 then prm[k]=n end
+        end
+    end
+    return prm
+end
 local lut_cache
-local function build_lut()
-    if lut_cache then return lut_cache end
-    local lut=ffi.new("uint32_t[?]",4*65536)
-    for p=0,65535 do
-        local r5=bit.rshift(p,11); local g6=bit.band(bit.rshift(p,5),63); local b5=bit.band(p,31)
-        local r=bit.bor(bit.lshift(r5,3),bit.rshift(r5,2))
-        local g=bit.bor(bit.lshift(g6,2),bit.rshift(g6,4))
-        local b=bit.bor(bit.lshift(b5,3),bit.rshift(b5,2))
-        for k=0,3 do
-            local t=DITHER_THRESHOLDS[k+1]
+local function build_lut(prm)
+    if lut_cache and not prm then return lut_cache end
+    prm=prm or load_color_params()
+    local lut=ffi.new("uint32_t[?]",16*4096)
+    local function grade(c,l)
+        c=l+(c-l)*prm.sat                       -- Saettigung um die Luma-Achse
+        c=(c-0.5)*prm.contrast+0.5              -- Kontrast um Mittelgrau
+        if c<0 then c=0 elseif c>1 then c=1 end
+        return c
+    end
+    for idx=0,4095 do
+        local r=bit.rshift(idx,8)/15; local g=bit.band(bit.rshift(idx,4),15)/15; local b=bit.band(idx,15)/15
+        r=r^prm.gamma; g=g^prm.gamma; b=b^prm.gamma    -- Gamma >1 = Mitteltoene tiefer, mehr Farbe
+        local l=0.299*r+0.587*g+0.114*b
+        r=grade(r,l); g=grade(g,l); b=grade(b,l)
+        for k=0,15 do
+            local t=(BAYER4[k+1]+0.5)/16
             local v=0xff000000
             if r>=t then v=v+0xff end
             if g>=t then v=v+0xff00 end
             if b>=t then v=v+0xff0000 end
-            lut[k*65536+p]=v
+            lut[k*4096+idx]=v
         end
     end
-    lut_cache=lut; return lut
+    if not lut_cache then lut_cache=lut end
+    return lut
 end
 -- Zeichnet nur den geaenderten Quellbereich [sx0,sx1)x[sy0,sy1) skaliert (nearest) und
 -- gedithert in den Canvas. Liefert den betroffenen Zielbereich (exklusive Obergrenze).
@@ -100,13 +125,16 @@ local function render_region(fb16,w,h,canvas,cstride4,xmap,ymap,draw_w,draw_h,sx
     local dx0=math.max(0,math.ceil(sx0*draw_w/w)); local dx1=math.min(draw_w,math.ceil(sx1*draw_w/w))
     local dy0=math.max(0,math.ceil(sy0*draw_h/h)); local dy1=math.min(draw_h,math.ceil(sy1*draw_h/h))
     if dx1<=dx0 or dy1<=dy0 then return nil end
-    local band=bit.band
+    local band,rshift,lshift=bit.band,bit.rshift,bit.lshift
     for dy=dy0,dy1-1 do
         local srow=fb16+ymap[dy]*w
         local drow=canvas+dy*cstride4
-        local rowk=band(dy,1)*131072
+        local rowk=band(dy,3)*16384            -- (dy%4)*4 Phasen * 4096
         for dx=dx0,dx1-1 do
-            drow[dx]=lut[rowk+band(dx,1)*65536+srow[xmap[dx]]]
+            local p=srow[xmap[dx]]
+            -- RGB565 -> RGB444-Index: R4=p>>12, G4=(p>>7)&15, B4=(p>>1)&15
+            local idx=band(rshift(p,4),0xF00)+band(rshift(p,3),0xF0)+band(rshift(p,1),0xF)
+            drow[dx]=lut[rowk+lshift(band(dx,3),12)+idx]
         end
     end
     return dx0,dy0,dx1,dy1
@@ -495,5 +523,5 @@ function M.open()
     if not ok then UIManager:show(InfoMessage:new{text=err}); return false end
     UIManager:show(View:new{}); return true
 end
-M._test={RFB=RFB,quote=quote,p16=p16,p32=p32,pointer_action=pointer_action,build_lut=build_lut,render_region=render_region}
+M._test={RFB=RFB,quote=quote,p16=p16,p32=p32,pointer_action=pointer_action,build_lut=build_lut,render_region=render_region,COLOR_DEFAULTS=COLOR_DEFAULTS,BAYER4=BAYER4}
 return M

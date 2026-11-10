@@ -127,6 +127,13 @@ static int mesa_probe(const char *process)
     };
     int i;
 
+    if (!kobo_cpu_has_neon("/proc/cpuinfo")) {
+        if (__android_log_print)
+            __android_log_print(LOG_ERROR, KOBO_EGL_TAG,
+                                "%s: CPU ohne NEON - Mesa (NEON-Build) wird nicht geladen, nutze libGLES_android.so",
+                                process);
+        return 0;
+    }
     for (i = 0; libs[i]; i++) {
         if (access(libs[i], R_OK) != 0) {
             if (__android_log_print)
@@ -147,6 +154,38 @@ static int mesa_probe(const char *process)
     if (__android_log_print)
         __android_log_print(LOG_INFO, KOBO_EGL_TAG, "%s: Mesa/softpipe (GLES2) geladen", process);
     return 1;
+}
+
+/* Die Mesa-Bibliotheken sind mit -mfpu=neon gebaut (scripts/05-mesa.sh). Auf einer CPU ohne NEON waere
+ * das ein SIGILL im App-Prozess, deshalb vorher /proc/cpuinfo pruefen. Nur auf ARM sinnvoll; auf dem
+ * Host (x86-Tests) gibt es kein "Features"-Feld und das Ergebnis ist immer "ja". */
+int kobo_cpu_has_neon(const char *cpuinfo_path)
+{
+    char buf[4096];
+    char *line;
+    ssize_t r;
+    int saw_features = 0;
+    int fd = open(cpuinfo_path, O_RDONLY | O_CLOEXEC);
+
+    if (fd < 0)
+        return 1;
+    r = read(fd, buf, sizeof buf - 1);
+    close(fd);
+    if (r <= 0)
+        return 1;
+    buf[r] = 0;
+    for (line = buf; line; ) {
+        char *eol = strchr(line, '\n');
+        if (eol)
+            *eol = 0;
+        if (strncmp(line, "Features", 8) == 0) {
+            saw_features = 1;
+            if (strstr(line, " neon") || strstr(line, " asimd"))
+                return 1;
+        }
+        line = eol ? eol + 1 : NULL;
+    }
+    return saw_features ? 0 : 1;
 }
 
 /* Interposes libcutils' property_get() for libEGL.so only. */

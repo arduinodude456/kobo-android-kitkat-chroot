@@ -47,6 +47,22 @@ int main(void) {
     expect(kobo_egl_override("ro.kernel.qemu.gles", "com.android.chrome", 1, 1, 0, 1), NULL, "qemu.gles untouched");
     expect(kobo_egl_override("ro.hardware.egl", "", 1, 1, 0, 1), NULL, "empty process");
     if (kobo_egl_process_wants_mesa(NULL, 1)) { printf("FAIL NULL process\n"); fails++; }
+    /* NEON-Pruefung (Mesa ist mit -mfpu=neon gebaut) */
+    {
+        const char *f[] = { "/tmp/kobo_cpu_neon", "/tmp/kobo_cpu_noneon", "/tmp/kobo_cpu_x86", "/tmp/kobo_cpu_a64" };
+        const char *c[] = {
+            "processor : 0\nFeatures : half thumb fastmult vfp edsp neon vfpv3 tls vfpv4 idiva\nCPU part : 0xd03\n",
+            "processor : 0\nFeatures : half thumb fastmult vfp edsp vfpv3 tls\nCPU part : 0xc09\n",
+            "processor : 0\nflags : fpu sse sse2\n",
+            "processor : 0\nFeatures : fp asimd evtstrm\n" };
+        int want[] = { 1, 0, 1, 1 }, i;
+        for (i = 0; i < 4; i++) {
+            FILE *fp = fopen(f[i], "w"); fputs(c[i], fp); fclose(fp);
+            if (kobo_cpu_has_neon(f[i]) != want[i]) { printf("FAIL neon %d\n", i); fails++; }
+            remove(f[i]);
+        }
+        if (kobo_cpu_has_neon("/nonexistent/cpuinfo") != 1) { printf("FAIL neon missing file\n"); fails++; }
+    }
     return fails;
 }
 '''
@@ -75,6 +91,8 @@ class EglPolicy(unittest.TestCase):
         self.assertIn('--disable-glx-tls', build)  # bionic KitKat has no ELF TLS in shared objects
         self.assertIn('MESA_SHA256=', build)
         self.assertIn('verify-mesa-elf.py', build)  # fail the build if dlopen() on KitKat would fail
+        self.assertIn('-mfpu=neon', build)  # softpipe is pure C: NEON/-O3 build for speed
+        self.assertIn('-O3', build)
 
 
 if __name__ == '__main__':

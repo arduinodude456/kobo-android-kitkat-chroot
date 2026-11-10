@@ -41,6 +41,20 @@ gegen ein Fake-ANativeWindow laufen; `python3 -m unittest tests.test_egl` testet
   KitKat-`libEGL`-Loader mit dem Property-Shim, Chrome/Firefox selbst. Erwartbar sind Anpassungen
   beim ersten CI-Lauf (fehlende bionic-Funktionen, configure-Cross-Probleme).
 
+## Leistung
+
+softpipe ist ein reiner C-Rasterizer ohne JIT; ein 3D-Spiel wie Minetest läuft damit bei 600 × 800 nur mit
+wenigen Sekunden pro Bild. Maßnahmen im Build (`scripts/05-mesa.sh`):
+
+* Mesa wird mit `-O3 -mfpu=neon -mtune=cortex-a15 -fno-math-errno -fno-trapping-math` gebaut (vorher `-O2`, VFPv3-D16 ohne NEON).
+  Der ABI bleibt `softfp`, die Bibliotheken bleiben zu den Systembibliotheken kompatibel. Überschreibbar mit `MESA_ARCH` / `MESA_OPT`
+  (alter Build: `MESA_ARCH="-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=softfp" MESA_OPT=-O2`).
+* Ohne NEON in `/proc/cpuinfo` lädt `kobo_egl.c` Mesa nicht, sondern bleibt bei `libGLES_android.so` (Log-Tag `kobo-egl`).
+
+Das bringt erfahrungsgemäß nur einen Faktor von etwa 1,3 bis 2. Deutlich mehr bringt weniger Rendering-Arbeit in der App
+(kleinere Sichtweite, keine Schatten/Shader-Effekte, Texturfilter aus, 3D-Auflösung verringern, sofern die App das anbietet).
+Ein echter Sprung wäre nur mit llvmpipe (LLVM-JIT) möglich; das ist ein großer Cross-Build (LLVM für ARM32) und noch nicht umgesetzt.
+
 ## Grenzen
 
 * softpipe ist langsam (reiner C-Code, kein LLVM/NEON-JIT). Seiten rendern, aber nicht flüssig.

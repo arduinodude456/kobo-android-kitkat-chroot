@@ -63,19 +63,43 @@ for _,k in ipairs({"release","pan_release","tap","hold_release","swipe","double_
 end
 check(pa("tap",false,true)=="tap" and pa("tap",false,false)==nil,"tap without prior touch is synthesized only inside")
 check(pa("hold",true,true)==nil,"hold keeps the press")
--- Dither-Tabelle muss exakt das alte pixelweise Verfahren ergeben (gleiche Schwellen).
+-- Dither-Tabelle gegen eine unabhaengige Referenz (Farbaufbereitung + 4x4-Bayer) pruefen.
 local bit=require("bit")
-local lut=module._test.build_lut()
-local TH={32,160,224,96}
-for _,p in ipairs({0,0xFFFF,0xF800,0x07E0,0x001F,0x8410,0x4208,0xC618,0x1234,0xABCD}) do
-    local r5,g6,b5=bit.rshift(p,11),bit.band(bit.rshift(p,5),63),bit.band(p,31)
-    local r,g,b=bit.bor(bit.lshift(r5,3),bit.rshift(r5,2)),bit.bor(bit.lshift(g6,2),bit.rshift(g6,4)),bit.bor(bit.lshift(b5,3),bit.rshift(b5,2))
-    for k=0,3 do
-        local t=TH[k+1]
-        local want=0xff000000+(r>=t and 0xff or 0)+(g>=t and 0xff00 or 0)+(b>=t and 0xff0000 or 0)
-        check(lut[k*65536+p]==want,"dither LUT matches reference for "..p.." phase "..k)
+local D=module._test.COLOR_DEFAULTS
+local lut=module._test.build_lut(D)
+local BY=module._test.BAYER4
+local function ref_pixel(p,dx,dy)
+    local r4,g4,b4=bit.rshift(p,12),bit.band(bit.rshift(p,7),15),bit.band(bit.rshift(p,1),15)
+    local c={(r4/15)^D.gamma,(g4/15)^D.gamma,(b4/15)^D.gamma}
+    local l=0.299*c[1]+0.587*c[2]+0.114*c[3]
+    local t=(BY[(dy%4)*4+(dx%4)+1]+0.5)/16
+    local v=0xff000000
+    for i=1,3 do
+        local x=l+(c[i]-l)*D.sat
+        x=(x-0.5)*D.contrast+0.5
+        x=math.max(0,math.min(1,x))
+        if x>=t then v=v+(i==1 and 0xff or i==2 and 0xff00 or 0xff0000) end
     end
+    return v
 end
+local function lut_pixel(p,dx,dy)
+    local idx=bit.band(bit.rshift(p,4),0xF00)+bit.band(bit.rshift(p,3),0xF0)+bit.band(bit.rshift(p,1),0xF)
+    return lut[(dy%4)*16384+(dx%4)*4096+idx]
+end
+for _,p in ipairs({0,0xFFFF,0xF800,0x07E0,0x001F,0x8410,0x4208,0xC618,0x1234,0xABCD}) do
+    for dy=0,3 do for dx=0,3 do
+        check(lut_pixel(p,dx,dy)==ref_pixel(p,dx,dy),"dither LUT matches reference for "..p.." phase "..dx..","..dy)
+    end end
+end
+-- Neutrale Farben duerfen keinen Farbstich bekommen (Text/UI bleibt schwarz-weiss).
+for _,p in ipairs({0x0000,0x8410,0xFFFF,0x4208,0xC618}) do
+    for dy=0,3 do for dx=0,3 do
+        local v=lut_pixel(p,dx,dy)
+        local r,g,b=bit.band(v,0xff),bit.band(bit.rshift(v,8),0xff),bit.band(bit.rshift(v,16),0xff)
+        check(r==g and g==b,"gray stays neutral: "..p)
+    end end
+end
+check(lut_pixel(0xFFFF,0,0)==0xffffffff and lut_pixel(0,3,3)==0xff000000,"white and black are preserved")
 -- Teil-Rendering == Voll-Rendering (Skalierung 5x6 -> 13x17, nicht ganzzahlig).
 local W,H,DW,DH=5,6,13,17
 local src=ffi.new("uint16_t[?]",W*H)
@@ -92,14 +116,10 @@ end
 local same=true
 for i=0,DW*DH-1 do if full[i]~=inc[i] then same=false end end
 check(same,"region-wise rendering equals full rendering")
--- Referenz: alter Pixel-fuer-Pixel-Weg.
+-- Referenz: unabhaengiger Pixel-fuer-Pixel-Weg.
 for dy=0,DH-1 do for dx=0,DW-1 do
     local p=src[ym[dy]*W+xm[dx]]
-    local r5,g6,b5=bit.rshift(p,11),bit.band(bit.rshift(p,5),63),bit.band(p,31)
-    local r,g,b=bit.bor(bit.lshift(r5,3),bit.rshift(r5,2)),bit.bor(bit.lshift(g6,2),bit.rshift(g6,4)),bit.bor(bit.lshift(b5,3),bit.rshift(b5,2))
-    local t=TH[(dy%2)*2+(dx%2)+1]
-    local want=0xff000000+(r>=t and 0xff or 0)+(g>=t and 0xff00 or 0)+(b>=t and 0xff0000 or 0)
-    assert(full[dy*DW+dx]==want,"pixel "..dx..","..dy)
+    assert(full[dy*DW+dx]==ref_pixel(p,dx,dy),"pixel "..dx..","..dy)
 end end
 count=count+1
 print("Lua RFB: "..count.." assertions passed")

@@ -38,6 +38,14 @@ on init
     mkdir /storage/emulated/0 0775 media_rw media_rw
     mkdir /storage/sdcard 0777 root root
     chmod 0777 /storage/sdcard
+    # Gemeinsame Ordner fuer alle Apps: sonst legt die erste App Android/ und Android/data mit umask 077
+    # (0700) an und jede weitere App (z. B. Minetest) bekommt EACCES auf /storage/sdcard/Android/data/...
+    mkdir /storage/sdcard/Android 0777 root root
+    mkdir /storage/sdcard/Android/data 0777 root root
+    mkdir /storage/sdcard/Android/obb 0777 root root
+    chmod 0777 /storage/sdcard/Android
+    chmod 0777 /storage/sdcard/Android/data
+    chmod 0777 /storage/sdcard/Android/obb
     symlink /storage/sdcard /sdcard
     symlink /storage/sdcard /mnt/sdcard
     mkdir /cache 0770 system cache
