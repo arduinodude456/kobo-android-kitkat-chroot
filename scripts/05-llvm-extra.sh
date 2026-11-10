@@ -6,7 +6,7 @@
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 
-EXTRA_TARGETS=(LLVMDebugInfoCodeView LLVMDebugInfoMSF LLVMDebugInfoDWARF LLVMGlobalISel)
+EXTRA_TARGETS=(LLVMDebugInfoCodeView LLVMDebugInfoMSF LLVMDebugInfoDWARF LLVMGlobalISel LLVMARMUtils LLVMBitReader)
 L="$BUILD/llvm"
 LLVM_PREFIX="${LLVM_PREFIX:-$L/prefix}"
 SRC="$L/src/llvm-toolchain-6.0_6.0.1"
@@ -85,4 +85,4 @@ if [[ -f "$LLVM_PREFIX/lib/libLLVMkobomerged.a" ]]; then
     mv "$LLVM_PREFIX"/lib/parts/libLLVM*.a "$LLVM_PREFIX/lib/"
 fi
 for t in "${EXTRA_TARGETS[@]}"; do cp "$CROSS/lib/lib$t.a" "$LLVM_PREFIX/lib/"; done
-ls -l "$LLVM_PREFIX/lib" | grep -E 'CodeView|MSF|DWARF|GlobalISel'
+ls -l "$LLVM_PREFIX/lib" | grep -E 'CodeView|MSF|DWARF|GlobalISel|ARMUtils|BitReader'

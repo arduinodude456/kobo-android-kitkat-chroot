@@ -84,7 +84,7 @@ jobs:
           set -o pipefail
           sudo apt-get install -y cmake ninja-build bzip2
           bash scripts/05-llvm.sh 2>&1 | tee build/logs/llvm.log
-      - name: Add extra LLVM libraries (CodeView, MSF, DWARF, GlobalISel; minutes, not hours)
+      - name: Add extra LLVM libraries (CodeView, MSF, DWARF, GlobalISel, ARMUtils, BitReader; minutes, not hours)
         id: llvm_extra
         if: ${{ inputs.llvmpipe && steps.llvm.outcome == 'success' }}
         continue-on-error: true
