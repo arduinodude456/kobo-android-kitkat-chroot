@@ -29,6 +29,12 @@ have_all() {
 [[ -f "$LLVM_PREFIX/.complete" ]] || { echo 'LLVM prefix missing: run 05-llvm.sh first' >&2; exit 1; }
 if have_all; then echo 'extra LLVM libraries already present'; exit 0; fi
 
+NDK_ZIP="$BUILD/downloads/android-ndk-r10e.zip"
+[[ -f "$NDK_ZIP" ]] || { echo 'run scripts/00-prebuilt-sdk.sh first' >&2; exit 1; }
+# Same as 05-llvm.sh: the C++ STL and API-19 headers are not in the NDK parts 00-prebuilt-sdk.sh unpacks.
+# Without them CMake's std::atomic check fails ("Host compiler must support std::atomic!").
+unzip -q -o "$NDK_ZIP" 'android-ndk-r10e/sources/cxx-stl/gnu-libstdc++/4.8/*' \
+    'android-ndk-r10e/platforms/android-19/arch-arm/usr/include/*' -d "$NDK_DIR"
 mkdir -p "$L/downloads" "$L/src" "$NATIVE" "$CROSS"
 if [[ ! -d "$SRC" ]]; then
     [[ -f "$L/downloads/llvm.tar.bz2" ]] || curl --fail --location --retry 3 "$LLVM_URL" --output "$L/downloads/llvm.tar.bz2"
