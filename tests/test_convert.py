@@ -32,7 +32,7 @@ class ConvertTests(unittest.TestCase):
         wf = (ROOT / '.github/workflows/build.yml').read_text()
         self.assertIn('default: true', wf)
         self.assertIn("steps.mesa_llvm.outcome != 'success'", wf)
-        self.assertEqual(wf.count('continue-on-error: true'), 2)
+        self.assertEqual(wf.count('continue-on-error: true'), 3)
 
 
 if __name__ == '__main__':
