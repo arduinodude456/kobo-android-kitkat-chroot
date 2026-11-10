@@ -866,6 +866,25 @@ data_reset() {
     fi
     echo "Geteilter Ordner bleibt erhalten: $PUBLIC_SHARED"
 }
+# ---- Diagnose: OpenGL ES 2 (Mesa/softpipe) -> gles.txt ------------------------------------------
+# "exec" startet ohne libkobofb.so; ohne Shim waehlt libEGL libGLES_android.so (nur GLES 1.x). Dieser
+# Test laedt die Shim im Chroot, wie es alle Android-Prozesse tun.
+gles_test() {
+    root_required
+    running && [ -f "$RUN/ready" ] || fail 'Android läuft nicht.'
+    out="$BASE/gles.txt"
+    {
+        echo "--- Mesa-Dateien:"; ls -l "$ROOTFS"/system/lib/egl/*_mesa.so "$ROOTFS"/system/lib/egl/dri/swrast_dri.so "$ROOTFS"/system/lib/libglapi.so.0 2>&1
+        echo "--- kobo-gles-test (erwartet GL_RENDERER=softpipe und OK):"
+        unset LD_LIBRARY_PATH
+        chroot "$ROOTFS" /system/bin/sh -c 'export PATH=/system/bin:/system/xbin ANDROID_ROOT=/system ANDROID_DATA=/data LD_PRELOAD=/system/lib/libkobofb.so; exec /system/bin/kobo-gles-test' 2>&1
+        echo "exit=$?"
+        echo "--- android.log (kobo-egl, libEGL, linker):"
+        grep -E 'kobo-egl|libEGL|linker|CANNOT LINK|cannot locate' "$ROOTFS/data/local/tmp/android.log" 2>/dev/null | tail -n 40
+    } > "$out" 2>&1
+    cat "$out"
+    echo "Gespeichert: $out"
+}
 case "${1:-status}" in
     check) check ;;
     start)
@@ -898,6 +917,7 @@ case "${1:-status}" in
     gapps-remove) gapps_remove ;;
     gapps-status) gapps_status ;;
     gapps-diag) gapps_diag ;;
+    gles-test) gles_test ;;
     reset) data_reset reset ;;
     wipe) data_reset wipe ;;
     status)
@@ -923,5 +943,5 @@ case "${1:-status}" in
         rmdir "$RUN/lock" 2>/dev/null || true
         echo 'Laufzeitzustand bereinigt.'
         ;;
-    *) echo 'Aufruf: sh android.sh {check|stages|start|stop|status|netinfo|gapps [ZIP]|gapps-remove|gapps-status|gapps-diag|reset|wipe|exec BEFEHL...|recover}' >&2; exit 2 ;;
+    *) echo 'Aufruf: sh android.sh {check|stages|start|stop|status|netinfo|gapps [ZIP]|gapps-remove|gapps-status|gapps-diag|reset|wipe|gles-test|exec BEFEHL...|recover}' >&2; exit 2 ;;
 esac

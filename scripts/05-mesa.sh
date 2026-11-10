@@ -144,6 +144,15 @@ inst "$(readlink -f "$L/libGLESv2.so")"     "$PRODUCT/system/lib/egl/libGLESv2_m
 inst "$(readlink -f "$L/libglapi.so")"      "$PRODUCT/system/lib/libglapi.so.0"
 inst "$L/egl/dri/swrast_dri.so"             "$PRODUCT/system/lib/egl/dri/swrast_dri.so"
 
+# Fail the build now if the KitKat linker could not dlopen() these libraries (missing NEEDED lib,
+# unresolved symbol, TLS, no DT_HASH).  On the device such a failure makes Chrome crash with
+# "GPU process isn't usable"; see scripts/verify-mesa-elf.py.
+python3 "$ROOT/scripts/verify-mesa-elf.py" --readelf "$TC/bin/$TRIPLE-readelf" \
+    --libdir "$PRODUCT/system/lib" --libdir "$PRODUCT/system/lib/egl" \
+    "$PRODUCT/system/lib/libglapi.so.0" \
+    "$PRODUCT/system/lib/egl/libEGL_mesa.so" "$PRODUCT/system/lib/egl/libGLESv1_CM_mesa.so" \
+    "$PRODUCT/system/lib/egl/libGLESv2_mesa.so" "$PRODUCT/system/lib/egl/dri/swrast_dri.so"
+
 # on-device smoke test
 "$CC" $ARCH_FLAGS -O2 --sysroot="$SYSROOT" -pie -fPIE "$ROOT/native/kobo_gles_test.c" -o "$W/kobo-gles-test" -lEGL -lGLESv2
 sudo install -m 0755 -o root -g root "$W/kobo-gles-test" "$PRODUCT/system/bin/kobo-gles-test"

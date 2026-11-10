@@ -17,20 +17,36 @@ static void expect(const char *got, const char *want, const char *what) {
         printf("FAIL %s: got %s want %s\n", what, got ? got : "NULL", want ? want : "NULL"); fails++; }
 }
 int main(void) {
-    expect(kobo_egl_override("ro.hardware.egl", "com.android.chrome", 1, 1, 0), "mesa", "app egl tag");
-    expect(kobo_egl_override("ro.kernel.qemu", "org.mozilla.firefox", 1, 1, 0), "0", "app qemu");
-    expect(kobo_egl_override("ro.hardware.egl", "/system/bin/surfaceflinger", 1, 1, 0), NULL, "sf egl");
-    expect(kobo_egl_override("ro.kernel.qemu", "surfaceflinger", 1, 1, 0), NULL, "sf qemu");
-    expect(kobo_egl_override("ro.hardware.egl", "/system/bin/bootanimation", 1, 1, 0), NULL, "bootanim");
-    expect(kobo_egl_override("ro.hardware.egl", "com.android.chrome", 0, 1, 0), NULL, "not libEGL caller");
-    expect(kobo_egl_override("ro.hardware.egl", "com.android.chrome", 1, 0, 0), NULL, "mesa missing");
-    expect(kobo_egl_override("ro.hardware.egl", "com.android.chrome", 1, 1, 1), NULL, "disabled");
-    expect(kobo_egl_override("ro.product.model", "com.android.chrome", 1, 1, 0), NULL, "other key");
-    expect(kobo_egl_override("ro.hardware.egl", "system_server", 1, 1, 0), NULL, "system_server");
-    expect(kobo_egl_override("ro.kernel.qemu", "zygote", 1, 1, 0), NULL, "zygote");
-    expect(kobo_egl_override("ro.hardware.egl", "com.android.systemui", 1, 1, 0), NULL, "systemui");
-    expect(kobo_egl_override("ro.hardware.egl", "com.android.launcher", 1, 1, 0), NULL, "launcher");
-    expect(kobo_egl_override("ro.hardware.egl", "com.android.chrome:sandboxed_process0", 1, 1, 0), "mesa", "chrome child");
+    /* Browser: Mesa unabhaengig von all_apps */
+    for (int all = 0; all <= 1; all++) {
+        expect(kobo_egl_override("ro.hardware.egl", "com.android.chrome", 1, 1, 0, all), "mesa", "chrome egl tag");
+        expect(kobo_egl_override("ro.kernel.qemu", "org.mozilla.firefox", 1, 1, 0, all), "0", "firefox qemu");
+        expect(kobo_egl_override("ro.hardware.egl", "com.android.chrome:privileged_process0", 1, 1, 0, all), "mesa", "chrome GPU process");
+        expect(kobo_egl_override("ro.hardware.egl", "com.android.chrome:sandboxed_process0", 1, 1, 0, all), "mesa", "chrome child");
+        expect(kobo_egl_override("ro.hardware.egl", "com.android.browser", 1, 1, 0, all), "mesa", "stock browser/WebView");
+        expect(kobo_egl_override("ro.hardware.egl", "/system/bin/kobo-gles-test", 1, 1, 0, all), "mesa", "gles test binary");
+    }
+    /* Beliebige Apps (Spiele, GLSurfaceView): nur mit all_apps */
+    expect(kobo_egl_override("ro.hardware.egl", "com.example.game", 1, 1, 0, 1), "mesa", "generic app");
+    expect(kobo_egl_override("ro.kernel.qemu", "com.example.game", 1, 1, 0, 1), "0", "generic app qemu");
+    expect(kobo_egl_override("ro.hardware.egl", "com.example.game", 1, 1, 0, 0), NULL, "generic app, apps off");
+    /* Systemprozesse behalten libGLES_android.so */
+    const char *sys[] = { "/system/bin/surfaceflinger", "surfaceflinger", "/system/bin/bootanimation",
+        "system_server", "zygote", "<pre-initialized>", "/system/bin/app_process", "/system/bin/mediaserver",
+        "com.android.systemui", "com.android.launcher", "com.android.launcher3", "com.android.keyguard",
+        "com.android.inputmethod.latin", "com.android.phone", "/system/bin/other-daemon", NULL };
+    for (int i = 0; sys[i]; i++) {
+        expect(kobo_egl_override("ro.hardware.egl", sys[i], 1, 1, 0, 1), NULL, sys[i]);
+        expect(kobo_egl_override("ro.kernel.qemu", sys[i], 1, 1, 0, 1), NULL, sys[i]);
+    }
+    /* Schutzbedingungen */
+    expect(kobo_egl_override("ro.hardware.egl", "com.android.chrome", 0, 1, 0, 1), NULL, "not libEGL caller");
+    expect(kobo_egl_override("ro.hardware.egl", "com.android.chrome", 1, 0, 0, 1), NULL, "mesa unusable (missing or dlopen failed)");
+    expect(kobo_egl_override("ro.hardware.egl", "com.android.chrome", 1, 1, 1, 1), NULL, "disabled");
+    expect(kobo_egl_override("ro.product.model", "com.android.chrome", 1, 1, 0, 1), NULL, "other key");
+    expect(kobo_egl_override("ro.kernel.qemu.gles", "com.android.chrome", 1, 1, 0, 1), NULL, "qemu.gles untouched");
+    expect(kobo_egl_override("ro.hardware.egl", "", 1, 1, 0, 1), NULL, "empty process");
+    if (kobo_egl_process_wants_mesa(NULL, 1)) { printf("FAIL NULL process\n"); fails++; }
     return fails;
 }
 '''
@@ -58,6 +74,7 @@ class EglPolicy(unittest.TestCase):
         build = (ROOT / 'scripts/05-mesa.sh').read_text()
         self.assertIn('--disable-glx-tls', build)  # bionic KitKat has no ELF TLS in shared objects
         self.assertIn('MESA_SHA256=', build)
+        self.assertIn('verify-mesa-elf.py', build)  # fail the build if dlopen() on KitKat would fail
 
 
 if __name__ == '__main__':
