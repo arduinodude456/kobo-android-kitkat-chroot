@@ -21,6 +21,11 @@ extern int __system_property_get(const char *name, char *value) __attribute__((w
 extern int __android_log_print(int prio, const char *tag, const char *fmt, ...) __attribute__((weak));
 #include <sys/types.h>
 #include <unistd.h>
+#include <signal.h>
+#include <stdlib.h>
+#if defined(__arm__)
+#include <ucontext.h>
+#endif
 
 #define KOBO_EGL_TAG "kobo-egl"
 #define LOG_INFO  4
@@ -112,6 +117,78 @@ const char *kobo_egl_override(const char *key, const char *process,
     return NULL;
 }
 
+/* Mesa-Prozesse (llvmpipe-JIT) sterben sonst ohne jede Spur: LLVM beendet sich bei Fehlern per exit(1),
+ * und debuggerd liefert hier keine Tombstones.  Deshalb loggt der Shim (Tag kobo-egl) jeden exit() und
+ * jedes harte Signal samt Absturzadresse (Bibliothek + Offset aus /proc/self/maps). */
+static char crash_process[128];
+static struct sigaction crash_old[32];
+
+static void describe_addr(char *out, size_t n, unsigned long a)
+{
+    FILE *f = fopen("/proc/self/maps", "r");
+    char line[512];
+
+    snprintf(out, n, "0x%lx (nicht in maps)", a);
+    if (!f)
+        return;
+    while (fgets(line, sizeof line, f)) {
+        unsigned long lo, hi, off;
+        char perms[8] = "", path[320] = "";
+        if (sscanf(line, "%lx-%lx %7s %lx %*s %*s %319[^\n]", &lo, &hi, perms, &off, path) >= 4 &&
+            a >= lo && a < hi) {
+            const char *name = path[0] ? base_name(path) : "[anonym, JIT-Code?]";
+            snprintf(out, n, "0x%lx = %s+0x%lx (%s)", a, name, a - lo + off, perms);
+            break;
+        }
+    }
+    fclose(f);
+}
+
+static void crash_handler(int sig, siginfo_t *si, void *ctx)
+{
+    char where[400], pcs[400], lrs[400];
+    unsigned long pc = 0, lr = 0;
+
+    (void) ctx;
+#if defined(__arm__)
+    pc = ((ucontext_t *) ctx)->uc_mcontext.arm_pc;
+    lr = ((ucontext_t *) ctx)->uc_mcontext.arm_lr;
+#endif
+    describe_addr(where, sizeof where, (unsigned long) (si ? si->si_addr : 0));
+    describe_addr(pcs, sizeof pcs, pc);
+    describe_addr(lrs, sizeof lrs, lr);
+    if (__android_log_print)
+        __android_log_print(LOG_ERROR, KOBO_EGL_TAG, "%s: Signal %d code=%d Fehleradresse %s | pc %s | lr %s",
+                            crash_process, sig, si ? si->si_code : 0, where, pcs, lrs);
+    sigaction(sig, &crash_old[sig], NULL);   /* danach greift wieder der alte Handler (debuggerd) */
+}
+
+static void exit_note(void)
+{
+    if (__android_log_print)
+        __android_log_print(LOG_ERROR, KOBO_EGL_TAG, "%s: Prozess beendet sich per exit()", crash_process);
+}
+
+static void install_crash_reporter(const char *process)
+{
+    static int done;
+    static const int sigs[] = { SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT };
+    struct sigaction sa;
+    unsigned i;
+
+    if (done)
+        return;
+    done = 1;
+    snprintf(crash_process, sizeof crash_process, "%.120s", process);
+    memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = crash_handler;
+    sa.sa_flags = SA_SIGINFO;
+    sigemptyset(&sa.sa_mask);
+    for (i = 0; i < sizeof sigs / sizeof sigs[0]; i++)
+        sigaction(sigs[i], &sa, &crash_old[sigs[i]]);
+    atexit(exit_note);
+}
+
 /* KitKat's Loader treats a failed dlopen() of the chosen driver as fatal
  * (LOG_ALWAYS_FATAL "couldn't find an OpenGL ES implementation" -> SIGABRT, which in turn makes
  * Chrome print "GPU process isn't usable. Goodbye." and crash).  So dlopen() the Mesa libraries
@@ -152,7 +229,8 @@ static int mesa_probe(const char *process)
         }
     }
     if (__android_log_print)
-        __android_log_print(LOG_INFO, KOBO_EGL_TAG, "%s: Mesa/softpipe (GLES2) geladen", process);
+        __android_log_print(LOG_INFO, KOBO_EGL_TAG, "%s: Mesa (GLES2) geladen", process);
+    install_crash_reporter(process);
     return 1;
 }
 

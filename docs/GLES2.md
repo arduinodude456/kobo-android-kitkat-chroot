@@ -83,6 +83,26 @@ der LLVM-Prefix wird danach gecacht:
 * Geprüft (Host): Patch-Skript, `llvm-config`-Wrapper und Mesas configure mit LLVM (`HAVE_LLVM=0x0600`, llvmpipe aktiv). **Nicht**
   geprüft: ARM-Cross-Build von LLVM/Mesa mit NDK r10e, `verify-mesa-elf.py` auf dem Ergebnis, JIT unter KitKat-bionic, FPS.
 
+### Wenn eine GLES2-App mit llvmpipe sofort verschwindet
+
+Typisches Bild: Log zeigt `kobo-egl: <app>: Mesa (GLES2) geladen`, danach stirbt der Prozess **ohne** Signal und ohne Tombstone.
+Ursache ist fast immer ein fataler LLVM-Fehler: LLVM beendet sich dabei per `exit(1)` und schreibt nur nach stderr (das es in
+Android-Apps nicht gibt). Seit diesem Stand steht der Grund in `android.log`/`logcat.txt`:
+
+* Tag `kobo-llvm` – `LLVM ERROR, Prozess endet gleich per exit(1): ...` (z. B. `Program used external function 'X' which could not
+  be resolved!`), `JIT-Symbol nicht aufloesbar: X` und einmal `JIT-CPU: <Kern> (LLVM-Host: <Name>)`.
+* Tag `kobo-egl` – `Prozess beendet sich per exit()` bzw. `Signal N ... Fehleradresse ... | pc <lib>+offset | lr ...` bei SIGSEGV/SIGILL/SIGBUS/SIGABRT
+  (`[anonym, JIT-Code?]` heisst: der Absturz passierte im vom JIT erzeugten Code).
+
+Was der Mesa-Patch (`mesa/apply_patches.py`, `lp_bld_misc.cpp`) am JIT aendert:
+
+* JIT-Symbole (`sinf`, `powf`, `memcpy`, ...) werden direkt per `dlopen`/`dlsym` aus libm/libc aufgeloest – unabhaengig davon, ob das
+  quergebaute LLVM `HAVE_DLOPEN` hatte. `__aeabi_*` kommen weiter aus LLVMs eigener libgcc-Tabelle.
+* Meldet LLVM den Kern als `generic` (unbekannte CPU-Kennung), rechnet der JIT sonst als ARMv4T ohne VFP/NEON; jetzt wird `cortex-a15`
+  (NEON, VFPv4, Hardware-Division) genommen. Mit `GALLIVM_MCPU=<kern>` in der Umgebung ueberschreibbar.
+
+Beides wirkt erst mit **neu gebautem Mesa** (`scripts/05-mesa.sh`, der gecachte LLVM-Prefix bleibt) und neuem `libkobofb.so`.
+
 ## Grenzen
 
 * softpipe ist langsam (reiner C-Code, kein LLVM/NEON-JIT). Seiten rendern, aber nicht flüssig.
