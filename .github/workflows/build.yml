@@ -68,8 +68,9 @@ jobs:
           set -o pipefail
           bash scripts/00-prebuilt-sdk.sh 2>&1 | tee build-prebuilt.log
       - name: Restore cached LLVM (llvmpipe only)
+        id: llvm_cache
         if: ${{ inputs.llvmpipe }}
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: build/llvm/prefix
           key: llvm-6.0.1-arm-${{ hashFiles('scripts/05-llvm.sh', 'llvm/apply_patches.py') }}
@@ -81,6 +82,12 @@ jobs:
           set -o pipefail
           sudo apt-get install -y cmake ninja-build bzip2
           bash scripts/05-llvm.sh 2>&1 | tee build/logs/llvm.log
+      - name: Save LLVM cache right after its build (so a later Mesa failure does not lose hours of work)
+        if: ${{ inputs.llvmpipe && steps.llvm.outcome == 'success' && steps.llvm_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: build/llvm/prefix
+          key: llvm-6.0.1-arm-${{ hashFiles('scripts/05-llvm.sh', 'llvm/apply_patches.py') }}
       - name: Cross-build Mesa with llvmpipe (+ softpipe) GLES2/EGL for the chroot
         id: mesa_llvm
         if: ${{ inputs.llvmpipe && steps.llvm.outcome == 'success' }}

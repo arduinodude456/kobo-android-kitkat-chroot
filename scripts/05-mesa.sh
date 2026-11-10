@@ -34,6 +34,21 @@ LLVM_PREFIX="${LLVM_PREFIX:-$BUILD/llvm/prefix}"
 if [[ "$MESA_LLVMPIPE" = 1 ]]; then
     [[ -x "$LLVM_PREFIX/bin/llvm-config" && -f "$LLVM_PREFIX/.complete" ]] || bash "$ROOT/scripts/05-llvm.sh"
     export LLVM_CONFIG="$LLVM_PREFIX/bin/llvm-config"
+    # Mesa's link (libtool) does not keep the --start-group/--end-group of the llvm-config wrapper, so the
+    # ~40 LLVM archives were scanned once, in alphabetical order: Analysis symbols needed by ScalarOpts or
+    # TransformUtils stayed undefined.  GNU ld rescans the members of ONE archive until nothing new
+    # resolves, so merge all of them into a single archive (idempotent; the parts move to lib/parts).
+    if [[ ! -f "$LLVM_PREFIX/lib/libLLVMkobomerged.a" ]]; then
+        mkdir -p "$LLVM_PREFIX/lib/parts"
+        mv "$LLVM_PREFIX"/lib/libLLVM*.a "$LLVM_PREFIX/lib/parts/"
+        {
+            echo "CREATE $LLVM_PREFIX/lib/libLLVMkobomerged.a"
+            for a in "$LLVM_PREFIX"/lib/parts/libLLVM*.a; do echo "ADDLIB $a"; done
+            echo SAVE; echo END
+        } > "$LLVM_PREFIX/merge.mri"
+        "$TC/bin/arm-linux-androideabi-ar" -M < "$LLVM_PREFIX/merge.mri"
+        "$TC/bin/arm-linux-androideabi-ranlib" "$LLVM_PREFIX/lib/libLLVMkobomerged.a"
+    fi
 fi
 unzip -q -o "$NDK_ZIP" 'android-ndk-r10e/sources/cxx-stl/gnu-libstdc++/4.8/*' \
     'android-ndk-r10e/platforms/android-19/arch-arm/usr/include/*' -d "$NDK_DIR"
