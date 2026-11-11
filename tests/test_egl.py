@@ -94,6 +94,13 @@ class EglPolicy(unittest.TestCase):
         self.assertIn('-mfpu=neon', build)  # softpipe is pure C: NEON/-O3 build for speed
         self.assertIn('-O3', build)
 
+    def test_jit_unwind_stub_is_reachable(self):
+        # Regression: getSymbolAddress skipped every __aeabi_* name before kobo_resolve_symbol(), so the
+        # __aeabi_unwind_cpp_pr* stub was never used and the JIT died with exit(1) (Minetest crash on KitKat).
+        script = (ROOT / 'mesa/apply_patches.py').read_text()
+        self.assertIn('if (!aeabi || Name.compare(0, 21, "__aeabi_unwind_cpp_pr") == 0)', script)
+        self.assertNotIn('if (Name.compare(0, 8, "__aeabi_") != 0)', script)
+
 
 if __name__ == '__main__':
     unittest.main()
