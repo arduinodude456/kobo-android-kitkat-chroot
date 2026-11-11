@@ -31,7 +31,7 @@ KOBO_DIAG_INTERVAL=15
 # OpenGL-ES-2-Renderaufloesung (Mesa/softpipe): Fenster-Surfaces werden mit 1/N der Fenstergroesse gerendert
 # und von SurfaceFlinger hochskaliert. 0 = automatisch (2 mit llvmpipe, 3 mit softpipe), 2 = 4x weniger Pixel,
 # 3 = 9x, 4 = 16x, 1 = aus (volle Aufloesung).
-KOBO_GLES_SCALE=0
+KOBO_GLES_SCALE=1
 # llvmpipe (nur wenn das Image mit MESA_LLVMPIPE=1 gebaut wurde; sonst gibt es nur softpipe): 1 = llvmpipe (LLVM-JIT,
 # mehrere Raster-Threads), 0 = softpipe. KOBO_LP_THREADS = Anzahl Raster-Threads (0 = automatisch = Anzahl CPUs).
 KOBO_GLES_LLVMPIPE=1
